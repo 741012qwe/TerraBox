@@ -5,10 +5,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class MySQLProvider implements DatabaseProvider {
+    private Connection connection;
     private final String url;
     private final String user;
     private final String pass;
-    private Connection connection;
 
     public MySQLProvider(String url, String user, String pass) {
         this.url = url;
@@ -23,7 +23,10 @@ public class MySQLProvider implements DatabaseProvider {
         } catch (ClassNotFoundException e) {
             throw new SQLException("MySQL JDBC驱动未找到: " + e.getMessage());
         }
-        connection = DriverManager.getConnection(url, user, pass);
+        // 连接池参数优化
+        String connectUrl = url + "?useSSL=" + (url.contains("ssl=true") ? "true" : "false") +
+                           "&connectTimeout=5000&socketTimeout=10000&autoReconnect=true";
+        connection = DriverManager.getConnection(connectUrl, user, pass);
         createTables();
     }
 
@@ -53,30 +56,31 @@ public class MySQLProvider implements DatabaseProvider {
             // 玩家数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS players (" +
                 "uuid VARCHAR(36) PRIMARY KEY," +
-                "name VARCHAR(64)," +
-                "kills INT DEFAULT 0," +
-                "deaths INT DEFAULT 0," +
-                "stats LONGTEXT," +
-                "inventory LONGTEXT," +
-                "last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                "name VARCHAR(32) NOT NULL," +
+                "kills INTEGER DEFAULT 0," +
+                "deaths INTEGER DEFAULT 0," +
+                "stats TEXT," +
+                "inventory TEXT," +
+                "last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "INDEX idx_last_login (last_login)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             // 箱子数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS boxes (" +
                 "id VARCHAR(36) PRIMARY KEY," +
-                "world VARCHAR(64)," +
-                "x INT," +
-                "y INT," +
-                "z INT," +
-                "loot_data LONGTEXT," +
+                "world VARCHAR(64) NOT NULL," +
+                "x INTEGER NOT NULL," +
+                "y INTEGER NOT NULL," +
+                "z INTEGER NOT NULL," +
+                "loot_data TEXT," +
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "INDEX idx_world (world)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             // 对局数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS games (" +
                 "id VARCHAR(36) PRIMARY KEY," +
-                "state VARCHAR(16)," +
-                "mode VARCHAR(16)," +
-                "players LONGTEXT," +
+                "state VARCHAR(16) NOT NULL," +
+                "mode VARCHAR(16) NOT NULL," +
+                "players TEXT," +
                 "started_at TIMESTAMP," +
                 "ended_at TIMESTAMP," +
                 "INDEX idx_state (state)" +
@@ -84,20 +88,22 @@ public class MySQLProvider implements DatabaseProvider {
         }
     }
 
+    /** 安全查询 */
     public ResultSet query(String sql) throws SQLException {
-        PreparedStatement ps = connection.prepareStatement(sql);
-        return ps.executeQuery();
+        return connection.prepareStatement(sql).executeQuery();
     }
 
+    /** 安全更新 */
     public int update(String sql) throws SQLException {
-        PreparedStatement ps = connection.prepareStatement(sql);
-        return ps.executeUpdate();
+        return connection.prepareStatement(sql).executeUpdate();
     }
 
+    /** 参数化查询 */
     public Map<String, Object> getPlayerData(String uuid) throws SQLException {
         Map<String, Object> data = new HashMap<>();
-        try (PreparedStatement ps = connection.prepareStatement(
-                "SELECT * FROM players WHERE uuid = ?")) {
+        String sql = "SELECT uuid, name, kills, deaths, stats, inventory, last_login " +
+                     "FROM players WHERE uuid = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, uuid);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -112,5 +118,23 @@ public class MySQLProvider implements DatabaseProvider {
             }
         }
         return data;
+    }
+
+    /** 参数化保存 */
+    public void savePlayer(String uuid, String name, int kills, int deaths, String stats, String inventory) throws SQLException {
+        String sql = "INSERT INTO players (uuid, name, kills, deaths, stats, inventory, last_login) " +
+                     "VALUES (?, ?, ?, ?, ?, ?, NOW()) " +
+                     "ON DUPLICATE KEY UPDATE " +
+                     "name=VALUES(name), kills=VALUES(kills), deaths=VALUES(deaths), " +
+                     "stats=VALUES(stats), inventory=VALUES(inventory)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, uuid);
+            ps.setString(2, name);
+            ps.setInt(3, kills);
+            ps.setInt(4, deaths);
+            ps.setString(5, stats);
+            ps.setString(6, inventory);
+            ps.executeUpdate();
+        }
     }
 }

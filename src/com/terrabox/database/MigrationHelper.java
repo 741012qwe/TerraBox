@@ -1,10 +1,6 @@
 package com.terrabox.database;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.HashMap;
 import java.util.Map;
 import org.bukkit.configuration.ConfigurationSection;
@@ -26,10 +22,16 @@ public class MigrationHelper {
     public Map<String, Object> getPlayerStats(String uuid) {
         Map<String, Object> stats = new HashMap<>();
         try {
-            ResultSet rs = provider.query("SELECT * FROM players WHERE uuid = '" + uuid + "'");
-            if (rs.next()) {
-                stats.put("kills", rs.getInt("kills"));
-                stats.put("deaths", rs.getInt("deaths"));
+            String sql = "SELECT uuid, kills, deaths FROM players WHERE uuid = ?";
+            try (PreparedStatement ps = provider.getConnection().prepareStatement(sql)) {
+                ps.setString(1, uuid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        stats.put("uuid", rs.getString("uuid"));
+                        stats.put("kills", rs.getInt("kills"));
+                        stats.put("deaths", rs.getInt("deaths"));
+                    }
+                }
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("查询玩家数据失败: " + e.getMessage());
