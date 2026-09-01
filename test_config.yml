@@ -1,0 +1,140 @@
+# 物资大陆测试配置
+world:
+  name: resource_land
+  border-size: 784
+
+boxes:
+  initial-fill: 150
+  max-count: 320
+  min-distance: 24
+  edge-padding: 24
+  refill-per-cycle: 12
+  refresh-minutes: 45
+  refill-on-open: true
+
+decorator:
+  enabled: true
+  batch-per-tick: 6
+  clear-center-radius: 30
+  wall-height: 3
+  tower-distance: 320
+  tower-rarity: EPIC
+
+game:
+  spawn-area-radius: 7
+  spawn-area-box-rarity:
+    - EPIC
+    - EPIC
+    - LEGENDARY
+    - LEGENDARY
+  min-players: 1
+  countdown-seconds: 30
+  duration-minutes: 30
+  win-reward: 1000
+
+loot:
+  COMMON:
+    items:
+      - material: IRON_INGOT
+        min: 2
+        max: 5
+        chance: 100
+      - material: GOLD_INGOT
+        min: 1
+        max: 3
+        chance: 50
+      - material: DIAMOND
+        min: 1
+        max: 2
+        chance: 20
+      - material: ENCHANTED_BOOK
+        enchants: {POWER:1-3, UNBREAKING:1}
+        chance: 15
+    money:
+      min: 50
+      max: 200
+      chance: 100
+  RARE:
+    items:
+      - material: IRON_INGOT
+        min: 5
+        max: 10
+        chance: 100
+      - material: GOLD_INGOT
+        min: 3
+        max: 6
+        chance: 80
+      - material: DIAMOND
+        min: 2
+        max: 4
+        chance: 40
+      - material: ENCHANTED_BOOK
+        enchants: {SHARPNESS:2-5, PROTECTION_ENVIRONMENTAL:1-3}
+        chance: 30
+    money:
+      min: 200
+      max: 500
+      chance: 80
+  EPIC:
+    items:
+      - material: IRON_INGOT
+        min: 10
+        max: 20
+        chance: 100
+      - material: GOLD_INGOT
+        min: 6
+        max: 12
+        chance: 90
+      - material: DIAMOND
+        min: 4
+        max: 8
+        chance: 60
+      - material: ENCHANTED_BOOK
+        enchants: {SHARPNESS:3-5, PROTECTION_ENVIRONMENTAL:2-4, LOOT_BONUS_BLOCKS:1-2}
+        chance: 50
+    money:
+      min: 500
+      max: 1000
+      chance: 60
+  LEGENDARY:
+    items:
+      - material: IRON_INGOT
+        min: 15
+        max: 30
+        chance: 100
+      - material: GOLD_INGOT
+        min: 10
+        max: 20
+        chance: 95
+      - material: DIAMOND
+        min: 8
+        max: 16
+        chance: 80
+      - material: ENCHANTED_BOOK
+        enchants: {SHARPNESS:4-5, PROTECTION_ENVIRONMENTAL:3-4, LOOT_BONUS_BLOCKS:2-3, EFFICIENCY:3-5}
+        chance: 70
+    money:
+      min: 1000
+      max: 2000
+      chance: 40
+  MYTHIC:
+    items:
+      - material: IRON_INGOT
+        min: 20
+        max: 40
+        chance: 100
+      - material: GOLD_INGOT
+        min: 15
+        max: 30
+        chance: 98
+      - material: DIAMOND
+        min: 12
+        max: 24
+        chance: 90
+      - material: ENCHANTED_BOOK
+        enchants: {SHARPNESS:5, PROTECTION_ENVIRONMENTAL:4, LOOT_BONUS_BLOCKS:3, EFFICIENCY:5, UNBREAKING:3}
+        chance: 90
+    money:
+      min: 2000
+      max: 5000
+      chance: 20
