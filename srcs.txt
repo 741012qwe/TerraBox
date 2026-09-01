@@ -41,3 +41,8 @@
 /var/minis/workspace/terrabox/src/com/terrabox/InviteManager.java
 /var/minis/workspace/terrabox/src/com/terrabox/InviteGui.java
 /var/minis/workspace/terrabox/src/com/terrabox/RoomGui.java
+/var/minis/workspace/terrabox/src/com/terrabox/database/DatabaseManager.java
+/var/minis/workspace/terrabox/src/com/terrabox/database/DatabaseProvider.java
+/var/minis/workspace/terrabox/src/com/terrabox/database/SQLiteProvider.java
+/var/minis/workspace/terrabox/src/com/terrabox/database/MySQLProvider.java
+/var/minis/workspace/terrabox/src/com/terrabox/database/MigrationHelper.java

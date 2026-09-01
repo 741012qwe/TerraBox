@@ -59,6 +59,7 @@ public final class TerraBoxPlugin extends JavaPlugin {
     private RoomGui roomGui;
     private PortalManager portals;
     private TerraCommand cmd;
+    private com.terrabox.database.DatabaseManager dbManager;
 
     private volatile Map<String, Double> sellPrices = Map.of();
 
@@ -137,6 +138,10 @@ public final class TerraBoxPlugin extends JavaPlugin {
             pc.setExecutor(cmd);
             pc.setTabCompleter(cmd);
         }
+
+        // 初始化数据库
+        dbManager = new com.terrabox.database.DatabaseManager(this);
+        dbManager.initialize();
 
         // 世界就绪 → 构建大厅 → 构建出生广场+装饰 → 启动物资箱/空投/计分板
         worlds.whenReady(() -> {

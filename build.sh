@@ -15,6 +15,8 @@ CP="$CP:$HUNT/examination-api.jar"
 CP="$CP:$HUNT/guava.jar"
 CP="$CP:$HUNT/bungeecord-chat.jar"
 CP="$CP:$HUNT/jetbrains-annotations.jar"
+CP="$CP:$HUNT/sqlite-jdbc-3.45.1.0.jar"
+CP="$CP:$HUNT/mysql-connector-j-8.3.0.jar"
 
 echo "== 编译 Java 25 =="
 find "$DIR/src" -name "*.java" > "$DIR/srcs.txt"
