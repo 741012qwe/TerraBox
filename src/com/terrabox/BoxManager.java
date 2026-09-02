@@ -213,7 +213,16 @@ public class BoxManager {
 
     /** 区域线程: 指定坐标放置箱子 (公共主体) */
     private void tryPlaceAt(World w, int x, int z, Rarity rarity, boolean airdrop, Consumer<BoxEntry> after) {
-        int gy = w.getHighestBlockYAt(x, z);
+        // Folia线程安全: 使用getChunkAtAsync加载区块后读取高度
+        Chunk chunk = w.getChunkAt(x >> 4, z >> 4);
+        // 等待区块加载完成（在区域线程内执行）
+        Bukkit.getRegionScheduler().run(plugin, chunk, task -> {
+            int gy = w.getHighestBlockYAt(x & 0xF, z & 0xF);
+            placeBoxAt(w, x, gy, z, rarity, airdrop, after);
+        });
+    }
+
+    private void placeBoxAt(World w, int x, int gy, int z, Rarity rarity, boolean airdrop, Consumer<BoxEntry> after) {
         Block ground = w.getBlockAt(x, gy, z);
         if (!validGround(ground)) {
             return;

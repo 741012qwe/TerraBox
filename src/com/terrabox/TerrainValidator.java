@@ -77,6 +77,7 @@ public class TerrainValidator {
     /** 校验单个区块 (区域线程, 只做结构验证避免全高遍历) */
     private void validateChunk(Chunk chunk, int[] sampled) {
         // Folia线程安全: 跳过实际方块读取, 仅记录区块已验证
+        // 原因: getHighestBlockYAt()在Global回调中会触发异步读取, 导致线程违规
         int cx = chunk.getX(), cz = chunk.getZ();
         plugin.getLogger().finer("地形区块 " + cx + "," + cz + " 已验证 (结构检查)");
     }
