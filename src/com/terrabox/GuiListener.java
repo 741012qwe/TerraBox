@@ -340,29 +340,37 @@ public class GuiListener implements Listener {
         }
     }
 
-    /** 按当前选定地形额外生成一个新对局世界并加入 */
+    /** 按当前选定地形额外生成一个新对局世界并加入 (Global 线程调用) */
     private void createNewTerrainWorld(Player p) {
         if (!p.hasPermission("terrabox.admin")) {
             p.sendMessage(plugin.msg("no-permission"));
             return;
         }
-        TerrainType type = TerrainType.DEFAULT; // 默认生成默认地形; 管理员可在命令里指定
-        String arg = "default";
-        org.bukkit.World w = plugin.arenas().createNew(TerrainType.parse(arg));
-        if (w != null) {
-            // 新世界也需要强制白天 + 预生成
-            Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                try {
-                    w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
-                    w.setTime(6000);
-                } catch (Throwable ignored) {}
-                plugin.arenas().select(w.getName());
-            });
-            p.sendMessage(plugin.msg("prefix") + "§a已生成新对局世界: §e" + w.getName());
-            p.closeInventory();
-        } else {
-            p.sendMessage(plugin.msg("prefix") + "§c新对局世界创建失败。");
-        }
+        // Folia: createNew 内部会调用 createWorld, 必须走 Global 线程
+        final Player player = p;
+        Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
+            try {
+                TerrainType type = TerrainType.DEFAULT;
+                org.bukkit.World w = plugin.arenas().createNewAsyncSafe(type);
+                if (w != null) {
+                    try {
+                        w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
+                        w.setTime(6000);
+                    } catch (Throwable ignored) {}
+                    plugin.arenas().select(w.getName());
+                    // 回到玩家线程发送消息
+                    org.bukkit.Location loc = player.getLocation();
+                    Bukkit.getRegionScheduler().run(plugin, loc, t -> {
+                        player.sendMessage(plugin.msg("prefix") + "§a已生成新对局世界: §e" + w.getName());
+                        player.closeInventory();
+                    });
+                } else {
+                    player.sendMessage(plugin.msg("prefix") + "§c新对局世界创建失败。");
+                }
+            } catch (Throwable e) {
+                player.sendMessage(plugin.msg("prefix") + "§c世界创建异常: " + e.getMessage());
+            }
+        });
     }
 
     @EventHandler

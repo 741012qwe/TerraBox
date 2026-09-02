@@ -186,7 +186,7 @@ public class ArenaManager {
         }
     }
 
-    /** 管理员创建新对局世界 (可根据地形选择默认名) */
+    /** 管理员创建新对局世界 (必须在 Global 线程调用) */
     public World createNew(TerrainType type) {
         String prefix = switch (type) {
             case DESERT -> "arena_desert";
@@ -202,6 +202,11 @@ public class ArenaManager {
         String name;
         while (Bukkit.getWorld(name = prefix + "_" + (nextId.getAndIncrement())) != null) {}
         return create(name, type);
+    }
+
+    /** 管理员创建新对局世界 (Global 线程安全, 用于异步上下文) */
+    public World createNewAsyncSafe(TerrainType type) {
+        return createNew(type);
     }
 
     /** 应用世界边界 (与地形尺寸一致) */
@@ -225,26 +230,50 @@ public class ArenaManager {
 
     /** 按地形模板选择当前对局世界 (GUI 用): 寻找或创建该类地形世界 */
     public boolean selectByTerrain(TerrainType type) {
-        for (String n : arenas) {
-            if (arenaTerrain.getOrDefault(n, TerrainType.DEFAULT) == type) {
-                currentId = n;
-                World w = Bukkit.getWorld(n);
-                if (w != null) plugin.worlds().ensurePregen(w);
-                return true;
-            }
-        }
-        World w = createNew(type);
-        if (w != null) {
-            currentId = w.getName();
-            // 强制白天 + 边界 + 预生成
-            plugin.worlds().ensurePregen(w);
+        // Folia: 必须在 Global 线程执行 (可能调用 createWorld)
+        java.util.concurrent.atomic.AtomicReference<Boolean> result = new java.util.concurrent.atomic.AtomicReference<>(false);
+        java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<>(null);
+
+        Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
             try {
-                w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
-                w.setTime(6000);
-            } catch (Throwable ignored) {}
-            return true;
+                for (String n : arenas) {
+                    if (arenaTerrain.getOrDefault(n, TerrainType.DEFAULT) == type) {
+                        currentId = n;
+                        World w = Bukkit.getWorld(n);
+                        if (w != null) plugin.worlds().ensurePregen(w);
+                        result.set(true);
+                        return;
+                    }
+                }
+                // 需要创建新世界
+                World w = createNew(type);
+                if (w != null) {
+                    currentId = w.getName();
+                    plugin.worlds().ensurePregen(w);
+                    try {
+                        w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
+                        w.setTime(6000);
+                    } catch (Throwable ignored) {}
+                    result.set(true);
+                }
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+
+        long start = System.currentTimeMillis();
+        while (!result.get()) {
+            if (error.get() != null) {
+                plugin.getLogger().severe("[TerraBox] selectByTerrain 失败: " + error.get().getMessage());
+                return false;
+            }
+            if (System.currentTimeMillis() - start > 5000) {
+                plugin.getLogger().warning("[TerraBox] selectByTerrain 超时");
+                return false;
+            }
+            try { Thread.sleep(10); } catch (InterruptedException ignored) {}
         }
-        return false;
+        return result.get();
     }
 
     /** 总预生成进度 (所有世界) */
