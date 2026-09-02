@@ -6,6 +6,10 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -137,16 +141,30 @@ public class BigBoxBuilding {
                             Block above = fw.getBlockAt(finalBx, boxY, finalBz);
                             if (above.getType().isAir() && ground.getType().isSolid()) {
                                 above.setType(Material.CHEST, false);
-                                if (above.getState() instanceof Chest chest) {
-                                    chest.customName(net.kyori.adventure.text.Component.text(
-                                            r.display + "物资箱", r.color));
-                                    chest.update();
-                                    int filled = plugin.loot().fillInventory(
-                                            ((org.bukkit.block.Chest) fw.getBlockAt(finalBx, boxY, finalBz)
-                                                    .getState()).getBlockInventory(), r);
-                                    plugin.getLogger().info("大建筑物资箱: 内部 " + r.display
-                                            + " ×" + finalBx + "," + boxY + "," + finalBz + " 战利品 " + filled + " 堆");
-                                }
+                                // 使用RegionScheduler在区域线程内操作箱子
+                                Location boxLoc = new Location(fw, finalBx, boxY, finalBz);
+                                Bukkit.getRegionScheduler().run(plugin, boxLoc, task -> {
+                                    Block placed = fw.getBlockAt(finalBx, boxY, finalBz);
+                                    if (placed.getState() instanceof Chest chest) {
+                                        // PDC标记
+                                        PersistentDataContainer pdc = chest.getPersistentDataContainer();
+                                        pdc.set(plugin.boxes().keyRarity(), PersistentDataType.STRING, r.name());
+                                        pdc.set(plugin.boxes().keyBorn(), PersistentDataType.LONG, System.currentTimeMillis());
+                                        // 自定义名
+                                        chest.customName(net.kyori.adventure.text.Component.text(
+                                                r.display + "物资箱", r.color));
+                                        chest.update();
+                                        // 登记到保护系统
+                                        BoxEntry entry = new BoxEntry(finalBx, boxY, finalBz, r, System.currentTimeMillis(), false);
+                                        plugin.boxes().registry().add(entry);
+                                        plugin.boxes().markDirty();
+                                        // 填充战利品
+                                        int filled = plugin.loot().fillInventory(
+                                                chest.getBlockInventory(), r);
+                                        plugin.getLogger().info("大建筑物资箱: 内部 " + r.display
+                                                + " ×" + finalBx + "," + boxY + "," + finalBz + " 战利品 " + filled + " 堆");
+                                    }
+                                });
                             }
                         } catch (Throwable ex) {
                             plugin.getLogger().warning("建筑物资箱放置异常: " + ex);

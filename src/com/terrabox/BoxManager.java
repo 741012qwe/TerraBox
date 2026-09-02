@@ -48,7 +48,17 @@ public class BoxManager {
         this.keyRarity = new NamespacedKey(plugin, "rarity");
         this.keyBorn = new NamespacedKey(plugin, "born");
         this.keyAirdrop = new NamespacedKey(plugin, "airdrop");
+        this.registry = new CopyOnWriteArrayList<>();
     }
+
+    /** 获取稀有度PDC键 */
+    public NamespacedKey keyRarity() { return keyRarity; }
+    /** 获取出生时间PDC键 */
+    public NamespacedKey keyBorn() { return keyBorn; }
+    /** 获取箱子注册表 */
+    public CopyOnWriteArrayList<BoxEntry> registry() { return registry; }
+    /** 标记需要保存 */
+    public void markDirty() { if (saveQueued.compareAndSet(false, true)) scheduleSave(); }
 
     // ==================== 数据结构 ====================
 
