@@ -393,17 +393,17 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
 
     /** 物资平衡性概览: 各档权重/箱子分布/刷新周期/投放上限/特殊道具 */
     private void sendBalance(CommandSender to) {
-        to.sendMessage(plugin.msg("prefix") + "§e===== 物资平衡性 =====");
+        to.sendMessage(plugin.msg("box.balance") + "===== 物资平衡性 =====");
         // 各档权重
         StringBuilder w = new StringBuilder();
         for (Rarity r : Rarity.values()) {
-            w.append(r.colorCode.replace('&', '\u00A7')).append(r.display).append("§7:").append(r.weight()).append("  ");
+            w.append(plugin.amp(r.colorCode)).append(r.display).append("§7:").append(r.weight()).append("  ");
         }
         to.sendMessage(" §7五档权重: " + w);
         // 箱子分布
         var counts = plugin.boxes().countByRarity();
         for (Rarity r : Rarity.values()) {
-            to.sendMessage(" §7" + r.display + "箱: " + r.colorCode.replace('&', '\u00A7')
+            to.sendMessage(" §7" + r.display + "箱: " + plugin.amp(r.colorCode)
                     + counts.getOrDefault(r, 0) + "§7 个");
         }
         to.sendMessage(" §7箱子总数/上限: §e" + plugin.boxes().count()

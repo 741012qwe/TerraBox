@@ -297,11 +297,11 @@ public class GuiListener implements Listener {
 
     private void sendDistribution(Player p) {
         var counts = plugin.boxes().countByRarity();
-        p.sendMessage(plugin.msg("prefix") + "§e地图物资箱分布 (共 §a" + plugin.boxes().count() + "§e 个):");
+        p.sendMessage(plugin.msg("box.distribution") + " 地图物资箱分布 (共 §a" + plugin.boxes().count() + "§e 个):");
         for (Rarity r : Rarity.values()) {
-            p.sendMessage(" §7" + r.display + ": " + r.colorCode.replace('&', '\u00A7') + counts.getOrDefault(r, 0) + " 个");
+            p.sendMessage(" §7" + r.display + ": " + plugin.amp(r.colorCode) + counts.getOrDefault(r, 0) + " 个");
         }
-        p.sendMessage(plugin.msg("prefix") + "§7下一波空投: §d约 " + (plugin.airdrops().secondsUntilNext() / 60 + 1) + " 分钟后");
+        p.sendMessage(plugin.msg("box.distribution") + " 下一波空投: §d约 " + (plugin.airdrops().secondsUntilNext() / 60 + 1) + " 分钟后");
     }
 
     /** 选择地形并切换当前对局世界 (管理员用) */
@@ -329,14 +329,14 @@ public class GuiListener implements Listener {
         boolean ok = plugin.arenas().selectByTerrain(type);
         if (ok) {
             String name = plugin.arenas().current() != null ? plugin.arenas().current().getName() : type.display;
-            p.sendMessage(plugin.msg("prefix") + "§a已选择地形: " + type.colorCode + type.display
+            p.sendMessage(plugin.msg("terrain.selected") + "已选择地形: " + plugin.amp(type.colorCode) + type.display
                     + " §7(世界: §e" + name + "§7)");
-            p.sendMessage(plugin.msg("prefix") + "§6正在重新初始化该世界地形与物资箱...");
+            p.sendMessage(plugin.msg("terrain.selected") + "正在重新初始化该世界地形与物资箱...");
             plugin.switchArena();
-            p.sendMessage(plugin.msg("prefix") + "§e地图已就绪, 用 §a/box game start <solo|pvp|team> §e开赛。");
+            p.sendMessage(plugin.msg("terrain.selected") + "地图已就绪, 用 §a/box game start <solo|pvp|team> §e开赛。");
             p.closeInventory();
         } else {
-            p.sendMessage(plugin.msg("prefix") + "§c地形世界创建失败, 请检查控制台日志。");
+            p.sendMessage(plugin.msg("terrain.failed") + "地形世界创建失败, 请检查控制台日志。");
         }
     }
 
