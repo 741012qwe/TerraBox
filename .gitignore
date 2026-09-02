@@ -1,4 +1,13 @@
-src/
+# 编译产物
 *.class
-TerraBox-*.jar
+*.jar
 
+# IDE配置
+.idea/
+.vscode/
+*.iml
+
+# 构建输出
+target/
+build/
+out/
