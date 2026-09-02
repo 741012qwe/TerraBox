@@ -94,8 +94,12 @@ public class ArenaManager {
             }
         });
 
-        // 等待任务完成 (阻塞当前线程)
+        // 等待任务完成 (阻塞当前线程, 带超时保护防死锁)
+        long start = System.currentTimeMillis();
         while (result.get() == null && error.get() == null) {
+            if (System.currentTimeMillis() - start > 5000) {
+                throw new RuntimeException("创建世界超时: " + name + " (等待超过5秒)");
+            }
             try { Thread.sleep(10); } catch (InterruptedException ignored) {}
         }
 

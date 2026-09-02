@@ -184,6 +184,9 @@ public class ScoreboardManager {
     /** 移除单个玩家的 BossBar + 清空 actionbar */
     public void clearPlayer(UUID u) {
         removeBar(u);
+        kills.remove(u);
+        deaths.remove(u);
+        boxesOpened.remove(u);
         Player p = Bukkit.getPlayer(u);
         if (p != null && p.isOnline()) {
             try { p.sendActionBar(net.kyori.adventure.text.Component.empty()); } catch (Throwable ignored) {}
@@ -199,6 +202,9 @@ public class ScoreboardManager {
 
     public void clearAll() {
         for (UUID u : bossBars.keySet()) removeBar(u);
+        kills.clear();
+        deaths.clear();
+        boxesOpened.clear();
         for (Player p : Bukkit.getOnlinePlayers()) {
             try { p.sendActionBar(net.kyori.adventure.text.Component.empty()); } catch (Throwable ignored) {}
         }
