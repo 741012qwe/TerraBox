@@ -426,3 +426,68 @@ artifacts:
     name: "&c&l吸血鬼獠牙"
     description: "&7传说武器, 附带吸血"
     effect: "lifesteal +3, attack_damage +2"
+
+# ==================== 消息配置 ====================
+messages:
+  # 通用消息
+  prefix: ""
+  no-permission: "&c你没有权限执行此命令。"
+  player-only: "&c此命令只能由玩家执行。"
+  not-ready: "&c系统正在初始化中, 请稍候..."
+  reloaded: "&a配置已重新加载。"
+
+  # 对局消息
+  game-started: "&e§l===== 对局开始 =====&r&e"
+  game-ending: "&e§l===== 对局结束 =====&r&e"
+  game-winner: "&e§l胜利者: &6%player%"
+  game-teams: "&e§l当前队伍人数: &6%solo=&r%solo% &e| &6pvp=&r%pvp% &e| &6team=&r%team%"
+  game-status: "&e当前对局状态: &6%state% &e| 存活: &6%alive%/%total%"
+  game-join: "&a你已成功加入对局! &e等待管理员开始。"
+  game-stop: "&c对局已停止。"
+
+  # 地形选择
+  terrain-selected: "&a已选择地形: &6%terrain% §7(世界: &e%world%§7)"
+  terrain-failed: "&c地形世界创建失败, 请检查控制台日志。"
+
+  # 箱子消息
+  box-distribution: "&e地图物资箱分布 (共 &a%count%§e 个):"
+  box-looted: "&a开箱成功! &e获得 %item% x%amount%"
+  box-emptied-self: "&e你的背包已满, 无法开箱。"
+  box-emptied-other: "&c其他玩家背包已满, 无法开箱。"
+  protected-block: "&c此方块受到保护, 无法破坏。"
+
+  # 狩猎消息
+  hunt-none: "&e附近没有可追踪的猎物。"
+  hunt-found: "&e发现猎物踪迹! &a追踪中..."
+
+  # 售卖消息
+  sell-empty: "&c背包中没有可售卖的物品。"
+  sell-done: "&a售卖成功! &e获得 &6%amount% &a金币"
+
+  # 重生消息
+  cooldown: "&e重生冷却中, 请等待 &6%seconds% &e秒..."
+  not-ready: "&c当前无法重生, 请稍候。"
+  respawn-found: "&a重生点已找到!"
+  respawn-fail: "&c重生点未找到, 请联系管理员。"
+
+  # 排行榜消息
+  top-header: "&e§l===== 排行榜 =====&r&e"
+  top-line: "&6%rank%. &e%player% &7- &a击杀:%kills% &c死亡:%deaths%"
+
+  # 战斗消息
+  killed-by: "&c被 &6%killer% &c击杀!"
+  killed-player: "&e你击杀了 &6%victim%"
+
+  # 房间消息
+  room-joined: "&a已加入房间 &6%room%"
+  room-left: "&c已离开房间。"
+  room-full: "&c房间已满员。"
+
+  # 空投消息
+  airdrop-caught: "&e空投已被你拾取!"
+  airdrop-failed: "&c空投掉落失败, 请重试。"
+
+  # 商店消息
+  shop-opened: "&e商店已打开"
+  shop-bought: "&a购买成功! &e获得 &6%item%"
+  shop-sold: "&a出售成功! &e获得 &6%amount% 金币"
