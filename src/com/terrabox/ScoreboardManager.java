@@ -91,8 +91,7 @@ public class ScoreboardManager {
                 // 纯发包极少失败; 万一失败只警告一次, 绝不刷屏
                 if (!warnLogged) {
                     warnLogged = true;
-                    plugin.getLogger().warning("对局信息显示更新失败: "
-                            + t.getClass().getSimpleName() + " - " + t.getMessage());
+                    plugin.getLogger().warning("对局信息显示更新失败: " + t.getClass().getSimpleName());
                 }
                 return;
             }

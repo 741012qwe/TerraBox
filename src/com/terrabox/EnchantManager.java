@@ -191,7 +191,7 @@ public class EnchantManager {
                     + " §7(等级 §e" + level + "§7)");
             return true; // 消耗附魔石
         } catch (Throwable t) {
-            player.sendMessage("§c附魔失败: " + t.getMessage());
+            player.sendMessage("§c附魔失败: " + "错误";
             return false;
         }
     }
@@ -255,7 +255,7 @@ public class EnchantManager {
                     + " §7(等级 §e" + level + "§7)");
             return true;
         } catch (Throwable t) {
-            player.sendMessage("§c附魔失败: " + t.getMessage());
+            player.sendMessage("§c附魔失败: " + "错误";
             return false;
         }
     }

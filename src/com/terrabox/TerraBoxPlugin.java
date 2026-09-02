@@ -231,13 +231,21 @@ public final class TerraBoxPlugin extends JavaPlugin {
 
     /** 返回原始消息 (不做颜色转换) */
     public String raw(String key) {
-        return getConfig().getString("messages." + key, key);
+        return getConfig().getString("messages." + key, "[消息缺失:" + key + "]");
     }
 
     /** 将 & 颜色代码转换为 § 格式 */
     public static String convertColorCode(String s) {
         if (s == null || s.isEmpty()) return s;
+        // 直接替换 & 为 §
         return s.replace("&", "§");
+    }
+
+    /** 将 & 颜色代码转换为 § 格式 (用于Adventure序列化前的处理) */
+    public static String prepareForAdventure(String s) {
+        if (s == null || s.isEmpty()) return s;
+        // 保持 & 不变, 让LegacyComponentSerializer处理
+        return s;
     }
 
     public net.kyori.adventure.text.Component component(String key, String... kv) {

@@ -107,7 +107,7 @@ public class PlayerStore {
                 Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (Exception e) {
-            plugin.getLogger().warning("玩家数据保存失败 " + d.name + ": " + e.getMessage());
+            plugin.getLogger().warning("玩家数据保存失败 " + d.name + ": " + "错误";
         }
     }
 
@@ -130,7 +130,7 @@ public class PlayerStore {
             d.merged.set(true);
             return d;
         } catch (Exception e) {
-            plugin.getLogger().warning("玩家数据读取失败 " + uuid + ": " + e.getMessage());
+            plugin.getLogger().warning("玩家数据读取失败 " + uuid + ": " + "错误";
             return null;
         }
     }

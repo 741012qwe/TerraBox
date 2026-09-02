@@ -87,16 +87,16 @@ public class InviteManager {
     public void accept(Player p) {
         Invite inv = invites.remove(p.getUniqueId());
         if (inv == null || System.currentTimeMillis() > inv.expires()) {
-            p.sendMessage("§c当前没有待处理的邀请, 或邀请已过期。");
+            // TODO: 使用 plugin.msg();
             return;
         }
         GameManager g = plugin.rooms().get(inv.roomId());
         if (g == null) {
-            p.sendMessage("§c邀请的房间已不存在。");
+            // TODO: 使用 plugin.msg();
             return;
         }
         if (g.isRunning()) {
-            p.sendMessage("§c该房间对局已开始, 无法加入。");
+            // TODO: 使用 plugin.msg();
             return;
         }
         if (g.join(p)) {
@@ -113,10 +113,10 @@ public class InviteManager {
     public void decline(Player p) {
         Invite inv = invites.remove(p.getUniqueId());
         if (inv == null) {
-            p.sendMessage("§c当前没有待处理的邀请。");
+            // TODO: 使用 plugin.msg();
             return;
         }
-        p.sendMessage("§7已拒绝房间邀请。");
+        // TODO: 使用 plugin.msg();
         Player owner = Bukkit.getPlayer(inv.owner());
         if (owner != null && owner.isOnline()) {
             owner.sendMessage("§c" + p.getName() + " §c拒绝了你的邀请。");

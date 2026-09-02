@@ -153,7 +153,6 @@ public class BoxManager {
                         tryPlace(w, fx, fz, rarity, airdrop, after, fa, ft);
                     } catch (Throwable ex) {
                         plugin.getLogger().warning("物资箱放置异常 (" + fx + "," + fz + "): " + ex);
-                        ex.printStackTrace(); // 完整堆栈定位 NPE 行
                         retryOrGiveUp(rarity, airdrop, after, fa, ft, "放置异常");
                     } finally {
                         try { w.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
@@ -183,7 +182,6 @@ public class BoxManager {
                         tryPlaceAt(w, x, z, rarity, airdrop, after);
                     } catch (Throwable ex) {
                         plugin.getLogger().warning("固定物资箱放置异常 (" + x + "," + z + "): " + ex);
-                        ex.printStackTrace(); // 完整堆栈定位 NPE 行
                     } finally {
                         try { w.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
                     }
@@ -510,7 +508,7 @@ public class BoxManager {
             y.set("boxes", lines);
             y.save(file);
         } catch (Exception ex) {
-            plugin.getLogger().warning("物资箱注册表保存失败: " + ex.getMessage());
+            plugin.getLogger().warning("物资箱注册表保存失败: " + "错误";
         }
     }
 
@@ -532,7 +530,7 @@ public class BoxManager {
                 } catch (Exception ignored) {}
             }
         } catch (Exception ex) {
-            plugin.getLogger().warning("物资箱注册表加载失败: " + ex.getMessage());
+            plugin.getLogger().warning("物资箱注册表加载失败: " + "错误";
         }
         return list;
     }

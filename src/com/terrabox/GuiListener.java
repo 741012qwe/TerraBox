@@ -70,7 +70,7 @@ public class GuiListener implements Listener {
                 case 16 -> plugin.cmd().sendTop(p);
                 case 11 -> sendDistribution(p);
                 case 15 -> plugin.cmd().sendStats(p, p);
-                case 13 -> p.sendMessage("§e玩法说明已列在菜单图标中, /box 也可随时查看。");
+                case 13 -> // TODO: 使用 plugin.msg();
                 case 18 -> plugin.gameGui().open(p); // 对局模式选择(GUI)
                 case 22 -> plugin.cmd().sendGameStatus(p); // 对局状态
                 case 19 -> plugin.rooms().requestReturnToLobby(p);  // 返回大厅 (对局中禁止)
@@ -94,8 +94,8 @@ public class GuiListener implements Listener {
                 case 22 -> plugin.menus().open(p);               // 返回主菜单
                 case 24 -> {
                     if (p.hasPermission("terrabox.admin")) {
-                        p.sendMessage("§e管理员开赛命令: §6/box room start <solo|pvp|team> <solo|pvp|team>");
-                        p.sendMessage("§7例: §e/box room start pvp pvp §7(在pvp房间开多人对战)");
+                        // TODO: 使用 plugin.msg();
+                        // TODO: 使用 plugin.msg();
                     }
                 }
                 default -> {}
@@ -140,7 +140,7 @@ public class GuiListener implements Listener {
                 boolean cursorOk = cursor == null || cursor.getType().isAir() || plugin.crafts().isCraftItem(cursor);
                 if (!cursorOk) {
                     p.playSound(p.getLocation(), org.bukkit.Sound.ENTITY_VILLAGER_NO, 1f, 1.2f);
-                    p.sendMessage("§c只能放入碎片/材料, 无法放置此物品。");
+                    // TODO: 使用 plugin.msg();
                     return; // 光标不合法, 什么都不做
                 }
                 // 手动交换: 槽内物品与光标物品互换 (光标空=取出, 槽空=放入, 都有=交换)
@@ -148,7 +148,7 @@ public class GuiListener implements Listener {
                 ItemStack newCursor = current;
                 // 若槽内已有非材料(异常残留), 禁止操作
                 if (current != null && !current.getType().isAir() && !plugin.crafts().isCraftItem(current)) {
-                    p.sendMessage("§c材料槽存在异常物品, 请关闭重开。");
+                    // TODO: 使用 plugin.msg();
                     return;
                 }
                 e.setCurrentItem(newSlot != null && newSlot.getType().isAir() ? null : newSlot.clone());
@@ -198,7 +198,7 @@ public class GuiListener implements Listener {
                 if (target != null && target.isOnline()) {
                     plugin.invites().invite(p, target, targetRoom);
                 } else {
-                    p.sendMessage("§c该玩家不在线。");
+                    // TODO: 使用 plugin.msg();
                 }
             }
             return;
@@ -366,7 +366,7 @@ public class GuiListener implements Listener {
                     player.sendMessage("§c新对局世界创建失败。");
                 }
             } catch (Throwable e) {
-                player.sendMessage("§c世界创建异常: " + e.getMessage());
+                player.sendMessage("§c世界创建异常: " + "错误";
             }
         });
     }

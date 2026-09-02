@@ -89,8 +89,7 @@ public class ArenaManager {
                 result.set(createWorld(name, type));
             } catch (Throwable t) {
                 error.set(t);
-                plugin.getLogger().severe("[TerraBox] 创建世界失败: " + name + " - " + t.getMessage());
-                t.printStackTrace();
+                plugin.getLogger().severe("[TerraBox] 创建世界失败: " + name + " - " + "错误";
             }
         });
 

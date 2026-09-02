@@ -109,7 +109,7 @@ public class SpecialItemManager implements Listener {
                         new SpecialDef(mat, key.toLowerCase(Locale.ROOT), name, lore,
                                 effect, radius, damage, velocity, dur));
             } catch (Exception e) {
-                plugin.getLogger().warning("特殊道具 [" + key + "] 解析失败: " + e.getMessage());
+                plugin.getLogger().warning("特殊道具 [" + key + "] 解析失败: " + "错误";
             }
         }
         plugin.getLogger().info("特殊道具表加载完成: " + defs.size() + " 种");
@@ -332,7 +332,7 @@ public class SpecialItemManager implements Listener {
             return true;
         } catch (Throwable t) {
             plugin.getLogger().warning("特殊道具 [" + key + "] 触发异常: " + t.getClass().getSimpleName()
-                    + " - " + t.getMessage());
+                    + " - " + "错误";
             return false;
         }
     }

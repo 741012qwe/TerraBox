@@ -149,7 +149,7 @@ public class PortalManager implements Listener {
         lastPortal.put(p.getUniqueId(), System.currentTimeMillis());
         ensureLoaded(port.targetWorld(), tw -> {
             if (tw == null) {
-                p.sendMessage("§c目标世界不可用。");
+                // TODO: 使用 plugin.msg();
                 return;
             }
             int cx = 0, cz = 0; // 目标世界中央传送
@@ -160,7 +160,7 @@ public class PortalManager implements Listener {
                     Location loc = new Location(tw, cx + 0.5, ty + 1.2, cz + 0.5);
                     p.teleportAsync(loc).thenAccept(ok -> {
                         if (ok) p.sendMessage("§a欢迎来到: §f" + tw.getName());
-                        else p.sendMessage("§c传送失败。");
+                        else // TODO: 使用 plugin.msg();
                     });
                 });
             });

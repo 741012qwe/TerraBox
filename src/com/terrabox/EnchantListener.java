@@ -126,11 +126,11 @@ public class EnchantListener implements Listener {
             }
         }
         if (targetEquip == null) {
-            p.sendMessage("§c请在手上或背包中准备一件可附魔的装备。");
+            // TODO: 使用 plugin.msg();
             return false;
         }
         if (isStone(targetEquip)) {
-            p.sendMessage("§c目标不是可附魔装备。");
+            // TODO: 使用 plugin.msg();
             return false;
         }
 

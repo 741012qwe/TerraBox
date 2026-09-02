@@ -76,7 +76,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
                         if (!hasAdmin(p)) return true;
                         GameManager.Mode m = args.length >= 3 ? GameManager.Mode.parse(args[2]) : GameManager.Mode.PVP;
                         if (m == null) {
-                            p.sendMessage("§c模式无效, 可选: solo / pvp / team");
+                            // TODO: 使用 plugin.msg();
                             return true;
                         }
                         if (!plugin.worlds().isReady()) { p.sendMessage(plugin.msg("not-ready")); return true; }
@@ -90,7 +90,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
                 }
             }
             case "help" -> sendHelp(p);
-            default -> p.sendMessage("§7未知子命令, 输入 §e/box help §7查看帮助。");
+            default -> // TODO: 使用 plugin.msg();
         }
         return true;
     }
@@ -104,8 +104,8 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             return;
         }
         if (!hasAdmin(p)) return;
-        if (g.storm() == null) { p.sendMessage("§c毒圈未初始化。"); return; }
-        p.sendMessage("§6===== 毒圈状态 =====");
+        if (g.storm() == null) { // TODO: 使用 plugin.msg(); return; }
+        // TODO: 使用 plugin.msg();
         p.sendMessage(" " + (g.storm().isActive() ? g.storm().status() : "§7未激活"));
         p.sendMessage(" §7阶段数: §e" + plugin.getConfig().getInt("storm.phases", 5)
                 + " §7| 每阶段等待: §e" + plugin.getConfig().getLong("storm.wait-seconds", 60)
@@ -152,11 +152,11 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             }
             case "airdrop" -> {
                 if (!plugin.worlds().isReady()) { sender.sendMessage(plugin.msg("not-ready")); return true; }
-                sender.sendMessage("§d立即空投!");
+                // TODO: 使用 plugin.msg();
                 plugin.airdrops().dropNow(null);
             }
             case "wipe" -> handleWipe(sender);
-            default -> sender.sendMessage("§e/box admin boxes|fill|airdrop|wipe");
+            default -> // TODO: 使用 plugin.msg();
         }
         return true;
     }
@@ -177,20 +177,20 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             case "create" -> createRoomFor(p, args.length >= 3 ? args[2] : null);
             case "invite" -> {
                 // /box room invite <玩家> [房间] — 邀请玩家加入自己的房间
-                if (args.length < 3) { p.sendMessage("§e用法: /box room invite <玩家> [房间]"); return; }
+                if (args.length < 3) { // TODO: 使用 plugin.msg(); return; }
                 Player target = Bukkit.getPlayer(args[2]);
                 if (target == null) { p.sendMessage("§c玩家不在线: " + args[2]); return; }
                 String roomId = args.length >= 4 ? args[3] : myRoom(p);
                 plugin.invites().invite(p, target, roomId);
             }
             case "join" -> {
-                if (args.length < 3) { p.sendMessage("§e用法: /box room join <id>"); return; }
+                if (args.length < 3) { // TODO: 使用 plugin.msg(); return; }
                 GameManager g = mgr.get(args[2]);
                 if (g == null) { p.sendMessage("§c房间 " + args[2] + " 不存在"); return; }
                 g.join(p);
             }
             case "leave" -> {
-                if (args.length < 3) { p.sendMessage("§e用法: /box room leave <id>"); return; }
+                if (args.length < 3) { // TODO: 使用 plugin.msg(); return; }
                 GameManager g = mgr.get(args[2]);
                 if (g != null) g.leave(p);
             }
@@ -201,10 +201,10 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             // ===== 管理员功能 =====
             case "remove" -> {
                 if (!hasAdmin(p)) return;
-                if (args.length < 3) { p.sendMessage("§e用法: /box room remove <id>"); return; }
+                if (args.length < 3) { // TODO: 使用 plugin.msg(); return; }
                 String id = args[2];
                 if (!mgr.hasRoom(id)) { p.sendMessage("§c房间 " + id + " 不存在"); return; }
-                if ("default".equalsIgnoreCase(id)) { p.sendMessage("§c不能删除默认房间"); return; }
+                if ("default".equalsIgnoreCase(id)) { // TODO: 使用 plugin.msg(); return; }
                 GameManager g = mgr.get(id);
                 if (g != null && g.isRunning()) { p.sendMessage("§c房间 " + id + " 对局进行中, 先停止"); return; }
                 mgr.removeRoom(id);
@@ -212,7 +212,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             }
             case "start" -> {
                 if (!hasAdmin(p)) return;
-                if (args.length < 4) { p.sendMessage("§e用法: /box room start <id> <solo|pvp|team>"); return; }
+                if (args.length < 4) { // TODO: 使用 plugin.msg(); return; }
                 String id = args[2];
                 GameManager.Mode m = args.length >= 4 ? GameManager.Mode.parse(args[3]) : GameManager.Mode.PVP;
                 GameManager g = mgr.get(id);
@@ -221,7 +221,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             }
             case "stop" -> {
                 if (!hasAdmin(p)) return;
-                if (args.length < 3) { p.sendMessage("§c用法: /box room stop <id>"); return; }
+                if (args.length < 3) { // TODO: 使用 plugin.msg(); return; }
                 GameManager g = mgr.get(args[2]);
                 if (g == null) { p.sendMessage("§c房间 " + args[2] + " 不存在"); return; }
                 g.stopGame(p);
@@ -229,7 +229,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
             case "force" -> {
                 if (!hasAdmin(p)) return;
                 // 管理员强制把玩家加入某房间
-                if (args.length < 4) { p.sendMessage("§e用法: /box room force <玩家> <房间>"); return; }
+                if (args.length < 4) { // TODO: 使用 plugin.msg(); return; }
                 Player target = Bukkit.getPlayer(args[2]);
                 if (target == null) { p.sendMessage("§c玩家不在线: " + args[2]); return; }
                 GameManager g = mgr.get(args[3]);
@@ -269,13 +269,13 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
     /** /box invite accept|decline — 聊天框点击接受/拒绝房间邀请 */
     private void invite(Player p, String[] args) {
         if (args.length < 2) {
-            p.sendMessage("§e用法: §f/box invite accept|decline §7(点击聊天框邀请文本即可)");
+            // TODO: 使用 plugin.msg();
             return;
         }
         switch (args[1].toLowerCase(java.util.Locale.ROOT)) {
             case "accept" -> plugin.invites().accept(p);
             case "decline" -> plugin.invites().decline(p);
-            default -> p.sendMessage("§e用法: §f/box invite accept|decline");
+            default -> // TODO: 使用 plugin.msg();
         }
     }
 
@@ -286,7 +286,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendRoomInfo(Player p, GameManager g) {
-        if (g == null) { p.sendMessage("§c房间不存在"); return; }
+        if (g == null) { // TODO: 使用 plugin.msg(); return; }
         p.sendMessage("§e===== 房间 [" + g.roomId() + "] =====");
         p.sendMessage(" §7房主: " + (g.owner() != null ? plugin.players().getOrCreate(g.owner(), null).name : "系统"));
         p.sendMessage(" §7世界: §b" + (g.roomWorldName() != null ? g.roomWorldName()
@@ -305,7 +305,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
 
     private void sendRoomList(Player p) {
         RoomManager mgr = plugin.rooms();
-        p.sendMessage("§e===== 在线对局房间 =====");
+        // TODO: 使用 plugin.msg();
         for (String id : mgr.roomIds()) {
             GameManager g = mgr.get(id);
             if (g == null) continue;
@@ -330,12 +330,12 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
     private void handleWipe(CommandSender sender) {
         if (wipeArmed) {
             wipeArmed = false;
-            sender.sendMessage("§e正在清空全部物资箱...");
-            plugin.boxes().wipeAll(() -> sender.sendMessage("§a物资箱已全部清空。"));
+            // TODO: 使用 plugin.msg();
+            plugin.boxes().wipeAll(() -> // TODO: 使用 plugin.msg());
         } else {
             wipeArmed = true;
             Bukkit.getGlobalRegionScheduler().runDelayed(plugin, t -> wipeArmed = false, 200L);
-            sender.sendMessage("§e再次输入 /box admin wipe 以确认清空全部物资箱 (10秒内)。");
+            // TODO: 使用 plugin.msg();
         }
     }
 
@@ -420,7 +420,7 @@ public class TerraCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendHelp(Player p) {
-        p.sendMessage("§e===== 物资大陆 帮助 =====");
+        // TODO: 使用 plugin.msg();
         p.sendMessage(" §f/box §7- 打开主菜单");
         p.sendMessage(" §f/box spawn §7- 传送到随机陆地出生点 (有冷却)");
         p.sendMessage(" §f/box sell §7- 打开物资回收商店");

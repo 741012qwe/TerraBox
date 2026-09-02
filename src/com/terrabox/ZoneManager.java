@@ -425,7 +425,7 @@ public class ZoneManager {
             Bukkit.broadcast(net.kyori.adventure.text.serializer.legacy
                     .LegacyComponentSerializer.legacyAmpersand().deserialize(raw));
         } catch (Throwable t) {
-            plugin.getLogger().warning("毒圈广播失败: " + t.getMessage());
+            plugin.getLogger().warning("毒圈广播失败: " + "错误";
         }
     }
 
@@ -474,7 +474,7 @@ public class ZoneManager {
                 w.spawnParticle(Particle.END_ROD, loc, 2, 0.0, 0.0, 0.0, 0.0);
             }
         } catch (Throwable t) {
-            plugin.getLogger().warning("毒圈边界粒子显示失败: " + t.getMessage());
+            plugin.getLogger().warning("毒圈边界粒子显示失败: " + "错误";
         }
     }
 }

@@ -180,7 +180,7 @@ public class GameManager {
     /** 无条件加入报名 (用于接受邀请/强制加入); @return 是否成功 */
     public boolean join(Player p) {
         if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage("§c对局正在进行中, 无法加入。");
+            // TODO: 使用 plugin.msg();
             return false;
         }
         UUID u = p.getUniqueId();
@@ -235,7 +235,7 @@ public class GameManager {
         // 单人模式: 管理元可开 (不限人数); 对战/组队需至少 2 人
         int minPlayers = Math.max(2, plugin.getConfig().getInt("game.min-players", 2));
         if (players.size() < 1) {
-            sender.sendMessage("§c参战人数不足, 请先 /box game join 报名。");
+            // TODO: 使用 plugin.msg();
             joined.clear();
             joinOrder.clear();
             players.clear();
@@ -277,10 +277,10 @@ public class GameManager {
 
     public void stopGame(org.bukkit.command.CommandSender sender) {
         if (state == State.IDLE) {
-            sender.sendMessage("§c当前没有进行中的对局。");
+            // TODO: 使用 plugin.msg();
             return;
         }
-        sender.sendMessage("§e管理员终止对局, 正在恢复地形...");
+        // TODO: 使用 plugin.msg();
         finish("管理员终止对局", null, List.of());
     }
 

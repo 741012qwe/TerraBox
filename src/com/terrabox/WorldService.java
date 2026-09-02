@@ -275,7 +275,7 @@ public class WorldService implements Listener {
             try {
                 hook.run();
             } catch (Exception e) {
-                plugin.getLogger().warning("世界就绪回调执行失败: " + e.getMessage());
+                plugin.getLogger().warning("世界就绪回调执行失败: " + "错误";
             }
         }
     }

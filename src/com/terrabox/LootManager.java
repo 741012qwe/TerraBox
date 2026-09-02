@@ -60,7 +60,7 @@ public class LootManager {
                             parseEnchants(raw.get("enchants")), name, lore, special, artifact, enchantStone, craft);
                     list.add(li);
                 } catch (Exception e) {
-                    plugin.getLogger().warning("战利品解析失败 " + r.key() + "#" + idx + ": " + e.getMessage());
+                    plugin.getLogger().warning("战利品解析失败 " + r.key() + "#" + idx + ": " + "错误";
                 }
             }
             tables.put(r, List.copyOf(list));

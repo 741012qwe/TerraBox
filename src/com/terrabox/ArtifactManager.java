@@ -80,7 +80,7 @@ public class ArtifactManager {
                         new ArtifactDef(mat, key.toLowerCase(Locale.ROOT), name, lore,
                                 effect, procChance, magnitude, ench));
             } catch (Exception e) {
-                plugin.getLogger().warning("神器 [" + key + "] 解析失败: " + e.getMessage());
+                plugin.getLogger().warning("神器 [" + key + "] 解析失败: " + "错误";
             }
         }
         plugin.getLogger().info("神器表加载完成: " + defs.size() + " 件");

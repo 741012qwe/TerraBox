@@ -33,7 +33,7 @@ public class Econ {
             }
         } catch (Throwable t) {
             vault = null;
-            plugin.getLogger().warning("Vault 经济接入失败, 回退内置积分: " + t.getMessage());
+            plugin.getLogger().warning("Vault 经济接入失败, 回退内置积分: " + "错误";
         }
     }
 
@@ -62,7 +62,7 @@ public class Econ {
                     plugin.getLogger().warning("Vault 存款失败: " + r.errorMessage);
                 return;
             } catch (Throwable t) {
-                plugin.getLogger().warning("Vault 存款异常, 回退内置积分: " + t.getMessage());
+                plugin.getLogger().warning("Vault 存款异常, 回退内置积分: " + "错误";
             }
         }
         plugin.players().getOrCreate(p.getUniqueId(), p.getName()).addMoney(amount);
@@ -76,7 +76,7 @@ public class Econ {
                 net.milkbowl.vault.economy.EconomyResponse r = vault.withdrawPlayer(p, amount);
                 return r != null && r.transactionSuccess();
             } catch (Throwable t) {
-                plugin.getLogger().warning("Vault 取款异常, 回退内置积分: " + t.getMessage());
+                plugin.getLogger().warning("Vault 取款异常, 回退内置积分: " + "错误";
             }
         }
         PlayerStore.PlayerData d = plugin.players().getOrCreate(p.getUniqueId(), p.getName());

@@ -163,7 +163,7 @@ public class CraftGui {
     public void craft(Player p, Inventory inv, GuiListener.GuiHolder holder) {
         List<CraftManager.Recipe> recipes = plugin.crafts().recipes();
         if (recipes.isEmpty()) {
-            p.sendMessage("§c暂无可用配方。");
+            // TODO: 使用 plugin.msg();
             return;
         }
         int idx = holder.craftIndex;
@@ -230,7 +230,7 @@ public class CraftGui {
         // 产出神器
         ItemStack out = plugin.artifacts().buildItem(recipe.artifact());
         if (out == null) {
-            p.sendMessage("§c神器构建失败, 材料已退还。");
+            // TODO: 使用 plugin.msg();
             returnAlloc(inv, new ArrayList<>(), placed, p);
             render(p, inv, holder);
             return;

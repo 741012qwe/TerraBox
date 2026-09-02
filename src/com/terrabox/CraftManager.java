@@ -66,7 +66,7 @@ public class CraftManager {
                     String artifact = s.getString("artifact", null);
                     defs.put(key.toLowerCase(Locale.ROOT), new CraftDef(mat, key.toLowerCase(Locale.ROOT), name, lore, artifact));
                 } catch (Exception e) {
-                    plugin.getLogger().warning("合成材料 [" + key + "] 解析失败: " + e.getMessage());
+                    plugin.getLogger().warning("合成材料 [" + key + "] 解析失败: " + "错误";
                 }
             }
         }
@@ -89,7 +89,7 @@ public class CraftManager {
                     }
                     if (!ing.isEmpty()) recipes.add(new Recipe(artifact, ing));
                 } catch (Exception e) {
-                    plugin.getLogger().warning("配方 [" + key + "] 解析失败: " + e.getMessage());
+                    plugin.getLogger().warning("配方 [" + key + "] 解析失败: " + "错误";
                 }
             }
         }
