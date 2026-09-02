@@ -516,3 +516,13 @@ messages:
   shop-opened: "&e商店已打开"
   shop-bought: "&a购买成功! &e获得 &6%item%"
   shop-sold: "&a出售成功! &e获得 &6%amount% 金币"
+
+  # 倒计时消息
+  game-countdown: "&e§l对局倒计时: &6%{seconds}% &e秒"
+  game-start: "&e§l===== 对局开始 =====&r&e"
+  game-running: "&e对局进行中 | 模式: &6%{mode}% &e| 存活: &6%{alive}%/%{total}%"
+  game-eliminated: "&c玩家 &6%{player}% &c被淘汰!"
+  game-tracker-grant: "&e你获得了追踪器! &6可用于标记敌人位置"
+  game-reset: "&a对局已重置, 地图恢复中..."
+  airdrop-placed: "&e空投已投放! &6前往拾取"
+  open-broadcast: "&e玩家 &6%{player}% &e打开了物资箱"

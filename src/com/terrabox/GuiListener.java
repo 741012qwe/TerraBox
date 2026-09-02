@@ -353,7 +353,7 @@ public class GuiListener implements Listener {
                 if (w != null) {
                     try {
                         w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
-                        w.setTime(6000);
+                        // Folia不支持在Global线程设置时间, 移除setTime()调用
                     } catch (Throwable ignored) {}
                     plugin.arenas().select(w.getName());
                     // 回到玩家线程发送消息

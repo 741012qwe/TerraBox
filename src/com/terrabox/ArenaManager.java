@@ -252,7 +252,7 @@ public class ArenaManager {
                     plugin.worlds().ensurePregen(w);
                     try {
                         w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
-                        w.setTime(6000);
+                        // Folia不支持在Global线程设置时间, 移除setTime()调用
                     } catch (Throwable ignored) {}
                     result.set(true);
                 }
