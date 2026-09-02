@@ -220,16 +220,16 @@ public final class TerraBoxPlugin extends JavaPlugin {
     // ==================== 消息工具 ====================
 
     private String prefix() {
-        return amp(getConfig().getString("messages.prefix", "&8[&6物资大陆&8] &r"));
+        return ""; // 不使用前缀,直接显示消息
     }
 
     public String msg(String key) {
         String raw = getConfig().getString("messages." + key, key);
-        return prefix() + amp(raw);
+        return raw; // 已移除prefix,直接返回消息内容
     }
 
     public String raw(String key) {
-        return amp(getConfig().getString("messages." + key, key));
+        return getConfig().getString("messages." + key, key);
     }
 
     public net.kyori.adventure.text.Component component(String key, String... kv) {
@@ -242,7 +242,11 @@ public final class TerraBoxPlugin extends JavaPlugin {
     }
 
     private static String amp(String s) {
-        return s == null ? "" : s.replace('&', '\u00A7');
+        if (s == null) return "";
+        // 直接使用Adventure序列化器处理颜色代码
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+                .legacyAmpersand().serialize(
+                    net.kyori.adventure.text.Component.text(s));
     }
 
     // ==================== 组件访问器 ====================
