@@ -3,6 +3,21 @@
 #   多世界 PVP 吃鸡 | 大厅 + 对局世界池
 # ================================================
 
+# ================================================
+#  数据库配置 (v2.3.0新增)
+#  type: 数据库类型 (sqlite/mysql/mariadb)
+#  SQLite: 默认, 单世界/小服务器推荐
+#  MySQL:  多世界/大型服务器推荐
+# ================================================
+database:
+  type: sqlite               # sqlite / mysql / mariadb
+  sqlite:
+    path: "database.db"      # 相对于插件数据目录
+  mysql:
+    url: "jdbc:mysql://localhost:3306/terrabox?useSSL=false&serverTimezone=UTC"
+    user: "root"
+    pass: ""
+
 world:
   name: "resource_land"        # 兼容旧资源世界名 (已废弃, 对局世界用 arena)
   border-size: 1024.0          # 默认对局世界边界
