@@ -1,0 +1,518 @@
+# ================================================
+#            物资大陆 TerraBox 配置文件
+#   多世界 PVP 吃鸡 | 大厅 + 对局世界池
+# ================================================
+
+# ================================================
+#  数据库配置 (v2.3.0新增)
+#  type: 数据库类型 (sqlite/mysql/mariadb)
+#  SQLite: 默认, 单世界/小服务器推荐
+#  MySQL:  多世界/大型服务器推荐
+# ================================================
+database:
+  type: sqlite               # sqlite / mysql / mariadb
+  sqlite:
+    path: "database.db"      # 相对于插件数据目录
+  mysql:
+    url: "jdbc:mysql://localhost:3306/terrabox?useSSL=false&serverTimezone=UTC"
+    user: "root"
+    pass: ""
+
+world:
+  name: "resource_land"        # 兼容旧资源世界名 (已废弃, 对局世界用 arena)
+  border-size: 1024.0          # 默认对局世界边界
+  seed: 0                      # 地图种子, 0 = 随机
+  pregen: true                 # 自动预生成对局世界区块
+  pregen-batch: 60             # 每批预生成区块数 (60/tick = 1200区块/秒, 全异步不卡线程)
+  pregen-interval-ticks: 1     # 每批间隔 (tick); 1 tick = 1200区块/秒
+  plain-radius: 120            # 中心平坦区半径 (格)
+  base-height: 64              # 中心地表基准高度 (y)
+  cover: true                  # 启用地形遮挡 (掩体/遮蔽结构)
+  cover-chance: 0.28           # 每个区块出现遮挡的概率 (0..1, 约每3~4区块一处)
+
+# ================================================
+#  大厅世界 (terra_lobby 512x512): 玩家聚集地
+# ================================================
+lobby:
+  name: "terra_lobby"
+  border-size: 512.0
+  platform-y: 64               # 平台基准高度
+  platform-radius: 24          # 中心广场半径 (格, 玩家聚集)
+  batch-per-tick: 8            # 每 tick 构建区块数
+
+# ================================================
+#  对局世界池 (多世界): 地形模板与数量
+#  size: 世界尺寸 (默认/沙漠/大岛屿均 1024x1024)
+#  worlds: 预创建的数量
+# ================================================
+arena:
+  default:
+    size: 1024
+    worlds: 1
+  desert:
+    size: 1024
+    worlds: 1
+  islands:
+    size: 1024
+    worlds: 1
+    island-chance: 0.55        # 岛屿生成概率 (每个16x16宏区块)
+  the_end:
+    size: 1024
+    worlds: 1                  # 末地岛屿世界数量 (THE_END 环境, 黑色天空)
+    island-chance: 0.42        # 外围浮空小岛生成概率 (每个16x16宏区块)
+  badlands:
+    size: 1024
+    worlds: 1                  # 恶地世界数量 (红沙+彩陶瓦层, 侵蚀平顶山)
+  nether:
+    size: 1024
+    worlds: 1                  # 下界世界数量 (NETHER 环境, 红色天空/岩浆湖)
+  city:
+    size: 1024
+    worlds: 1                  # 城市世界数量 (街道网格+建筑群+公园)
+  normal:
+    size: 1056                 # 正常主世界尺寸 (1056x1056 边境墙/围墙)
+    worlds: 1                  # 正常主世界数量 (多样地形+地狱/末地传送门)
+  big-buildings: 3             # 大型物资建筑数量 (室内多个物资箱)
+
+boxes:
+  max-count: 200               # 全图物资箱总数上限
+  initial-fill: 150            # 预生成完成后首批投放数量
+  refill-per-cycle: 8          # 每个维护周期最多补充数量
+  min-distance: 18.0           # 箱子之间的最小水平距离 (格)
+  edge-padding: 16             # 距世界边界的保护距离 (格)
+  refresh-minutes: 45          # 物资箱存留时间, 到期自动换位置重生成
+  refill-on-open: true         # 物资箱被搬空后, 立即在别处补一个同稀有度箱子
+  protect-break: true          # 禁止破坏物资箱 (管理员可用 /box admin wipe)
+  protect-hopper: true         # 禁止漏斗/容器抽取物资箱内容
+  broadcast-mythic: true       # 绝世物资箱投放时全服广播
+  broadcast-airdrop: true      # 空投投放时全服广播坐标
+
+spawn:
+  on-first-join: true          # 新玩家首次进服随机陆地出生
+  on-respawn: false            # 死亡重生后传送到随机陆地
+  min-radius: 80               # 出生点距地图中心最小距离
+  max-radius: 360              # 出生点距地图中心最大距离 (边界392)
+  tries: 10                    # 找陆地重试次数
+  command-cooldown-seconds: 300  # /box spawn 冷却 (管理员免冷却)
+
+economy:
+  use-vault: true              # 检测到 Vault 则使用 Vault 经济, 否则用内置积分
+  loot-money: true             # 开箱额外掉落货币
+  start-money: 0               # 新玩家内置积分初始值
+
+airdrop:
+  enabled: true                # 定时空投 (全服广播坐标的传说箱)
+  interval-minutes: 20         # 空投间隔
+  rarity: LEGENDARY            # 空投资源箱稀有度
+
+hunt:
+  cost: 120                    # 寻宝消耗货币
+  rarities: [EPIC, LEGENDARY, MYTHIC]   # 寻宝可提示的稀有度
+
+particles:
+  enabled: true                # 高稀有度物资箱粒子标记
+  rarities: [LEGENDARY, MYTHIC]
+  interval-ticks: 60
+
+# 回收商店价格表 (单位: 元/个)  /box sell 或 /box prices 查看
+sell:
+  prices:
+    COAL: 1.5
+    COPPER_INGOT: 1.0
+    IRON_INGOT: 4.0
+    GOLD_INGOT: 10.0
+    IRON_BLOCK: 36.0
+    GOLD_BLOCK: 90.0
+    DIAMOND: 45.0
+    DIAMOND_BLOCK: 405.0
+    EMERALD: 18.0
+    EMERALD_BLOCK: 162.0
+    NETHERITE_SCRAP: 80.0
+    NETHERITE_INGOT: 320.0
+    LAPIS_LAZULI: 2.0
+    REDSTONE: 1.5
+    QUARTZ: 2.5
+    AMETHYST_SHARD: 6.0
+    ANCIENT_DEBRIS: 120.0
+    EXPERIENCE_BOTTLE: 8.0
+    GOLDEN_APPLE: 60.0
+    ENDER_PEARL: 15.0
+    BLAZE_ROD: 12.0
+    GHAST_TEAR: 20.0
+    PHANTOM_MEMBRANE: 10.0
+    LEATHER: 2.0
+    FEATHER: 0.5
+    STRING: 0.8
+    GUNPOWDER: 3.0
+    ARROW: 0.3
+    TOTEM_OF_UNDYING: 250.0
+    ELYTRA: 900.0
+    TRIDENT: 600.0
+
+# ================================================
+#  物资箱战利品表 (五档稀有度, 可自由增删改)
+#  weight = 投放时抽中该档的权重 (平衡: 权重和≈100)
+#  items:  material=物品  min/max=数量范围  chance=出现概率(%)
+#  enchants: "附魔名:等级" 或 "附魔名:最小-最大"
+#  money: 开箱额外货币奖励
+# ================================================
+loot:
+  COMMON:
+    weight: 50
+    money: {min: 3, max: 15, chance: 40}
+    items:
+      - {material: BREAD, min: 1, max: 3, chance: 60}
+      - {material: APPLE, min: 1, max: 2, chance: 45}
+      - {material: COAL, min: 2, max: 6, chance: 55}
+      - {material: COPPER_INGOT, min: 1, max: 4, chance: 40}
+      - {material: IRON_INGOT, min: 1, max: 3, chance: 35}
+      - {material: STICK, min: 2, max: 5, chance: 40}
+      - {material: TORCH, min: 4, max: 10, chance: 50}
+      - {material: LEATHER, min: 1, max: 3, chance: 30}
+      - {material: ARROW, min: 6, max: 12, chance: 30}
+      - {material: STRING, min: 1, max: 3, chance: 25}
+      - {material: IRON_PICKAXE, min: 1, max: 1, chance: 10}
+      - {material: IRON_SWORD, min: 1, max: 1, chance: 8}
+      - {material: COOKED_BEEF, min: 1, max: 2, chance: 30}
+      - {material: OAK_LOG, min: 2, max: 6, chance: 25}
+      - {material: EXPERIENCE_BOTTLE, min: 1, max: 2, chance: 15}
+      # 特殊道具 (低概率)
+      - {material: FIREWORK_STAR, min: 1, max: 1, chance: 6, special: repulse_wave}
+      - {material: SUGAR, min: 1, max: 1, chance: 6, special: speed_charge}
+      - {material: RABBIT_FOOT, min: 1, max: 1, chance: 5, special: jump_charge}
+
+  RARE:
+    weight: 27
+    money: {min: 12, max: 45, chance: 60}
+    items:
+      - {material: COOKED_BEEF, min: 2, max: 4, chance: 50}
+      - {material: GOLD_INGOT, min: 1, max: 3, chance: 45}
+      - {material: IRON_INGOT, min: 2, max: 5, chance: 45}
+      - {material: LAPIS_LAZULI, min: 2, max: 6, chance: 35}
+      - {material: REDSTONE, min: 3, max: 8, chance: 35}
+      - {material: EMERALD, min: 1, max: 3, chance: 30}
+      - {material: DIAMOND, min: 1, max: 1, chance: 25}
+      - {material: IRON_CHESTPLATE, min: 1, max: 1, chance: 15}
+      - {material: IRON_HELMET, min: 1, max: 1, chance: 15}
+      - {material: BOW, min: 1, max: 1, chance: 18, enchants: {POWER: 1, INFINITY: 1}}
+      - {material: SHIELD, min: 1, max: 1, chance: 15}
+      - {material: ENDER_PEARL, min: 1, max: 1, chance: 20}
+      - {material: GOLDEN_CARROT, min: 2, max: 4, chance: 30}
+      - {material: BUCKET, min: 1, max: 1, chance: 20}
+      # 特殊道具
+      - {material: FIRE_CHARGE, min: 1, max: 1, chance: 8, special: fireball_tnt}
+      - {material: ICE, min: 1, max: 1, chance: 7, special: freeze_crystal}
+      - {material: SHIELD, min: 1, max: 1, chance: 7, special: shield_charge}
+      - {material: BLAZE_POWDER, min: 1, max: 1, chance: 6, special: fire_res_charge}
+
+  EPIC:
+    weight: 15
+    money: {min: 35, max: 120, chance: 80}
+    items:
+      - {material: DIAMOND, min: 1, max: 3, chance: 70}
+      - {material: GOLDEN_APPLE, min: 1, max: 2, chance: 45}
+      - {material: EXPERIENCE_BOTTLE, min: 4, max: 8, chance: 50}
+      - {material: IRON_BLOCK, min: 1, max: 2, chance: 40}
+      - {material: EMERALD_BLOCK, min: 1, max: 1, chance: 25}
+      - {material: DIAMOND_SWORD, min: 1, max: 1, chance: 30, enchants: {SHARPNESS: 2-3, UNBREAKING: 2}}
+      - {material: DIAMOND_PICKAXE, min: 1, max: 1, chance: 30, enchants: {EFFICIENCY: 2-3, FORTUNE: 2}}
+      - {material: ENDER_PEARL, min: 1, max: 2, chance: 35}
+      - {material: OBSIDIAN, min: 2, max: 4, chance: 30}
+      # 特殊道具
+      - {material: FIRE_CHARGE, min: 1, max: 1, chance: 12, special: fireball_tnt}
+      - {material: POTION, min: 1, max: 1, chance: 10, special: heal_potion}
+      - {material: ICE, min: 1, max: 1, chance: 10, special: freeze_crystal}
+      - {material: SHIELD, min: 1, max: 1, chance: 10, special: shield_charge}
+      - {material: ANVIL, min: 1, max: 1, chance: 20}
+      # 附魔石
+      - {material: LAPIS_LAZULI, min: 1, max: 1, chance: 10, enchant-stone: normal}
+      # 神器 (稀有级少量随机刷新)
+      - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 5, artifact: celestial_blade}
+      - {material: NETHERITE_AXE, min: 1, max: 1, chance: 4, artifact: aegis_axe}
+      - {material: BOW, min: 1, max: 1, chance: 4, artifact: draco_bow}
+
+  LEGENDARY:
+    weight: 7
+    money: {min: 90, max: 300, chance: 90}
+    items:
+      - {material: NETHERITE_INGOT, min: 1, max: 2, chance: 45}
+      - {material: ANCIENT_DEBRIS, min: 1, max: 3, chance: 35}
+      - {material: DIAMOND_BLOCK, min: 1, max: 2, chance: 50}
+      - {material: BOW, min: 1, max: 1, chance: 28, enchants: {POWER: 3-4, FLAME: 1, PUNCH: 2}}
+      - {material: TRIDENT, min: 1, max: 1, chance: 10, enchants: {LOYALTY: 3, IMPALING: 3}}
+      - {material: TOTEM_OF_UNDYING, min: 1, max: 1, chance: 12}
+      - {material: ELYTRA, min: 1, max: 1, chance: 6}
+      - {material: EXPERIENCE_BOTTLE, min: 10, max: 20, chance: 60}
+      # 特殊道具
+      - {material: FIRE_CHARGE, min: 1, max: 1, chance: 16, special: fireball_big}
+      - {material: BLAZE_ROD, min: 1, max: 1, chance: 14, special: lightning_wand}
+      - {material: TNT, min: 1, max: 1, chance: 14, special: tnt_charge}
+      - {material: FIREWORK_STAR, min: 1, max: 1, chance: 12, special: repulse_wave}
+      # 自定义品质道具
+      - {material: DIAMOND_SWORD, min: 1, max: 1, chance: 20, enchants: {SHARPNESS: 4, UNBREAKING: 3}, name: "&6&l传说之剑", lore: "&7传说中英雄的佩剑。\n&7攻击:+1"}
+      - {material: BOW, min: 1, max: 1, chance: 15, enchants: {POWER: 4, FLAME: 1}, name: "&e&l猎龙弓", lore: "&7一箭射落巨龙。\n&7精准:+1"}
+      # 神器 (传说级随机刷新终极装备)
+      - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 9, artifact: celestial_blade}
+      - {material: NETHERITE_AXE, min: 1, max: 1, chance: 8, artifact: aegis_axe}
+      - {material: BOW, min: 1, max: 1, chance: 8, artifact: draco_bow}
+      - {material: NETHERITE_CHESTPLATE, min: 1, max: 1, chance: 8, artifact: titan_chest}
+      - {material: NETHERITE_BOOTS, min: 1, max: 1, chance: 7, artifact: wind_boots}
+      # 附魔石
+      - {material: LAPIS_LAZULI, min: 1, max: 1, chance: 12, enchant-stone: normal}
+
+  MYTHIC:
+    weight: 1
+    money: {min: 250, max: 600, chance: 100}
+    items:
+      - {material: NETHERITE_INGOT, min: 2, max: 4, chance: 90}
+      - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 40, enchants: {SHARPNESS: 4, FIRE_ASPECT: 2, LOOTING: 3}}
+      - {material: NETHERITE_PICKAXE, min: 1, max: 1, chance: 40, enchants: {EFFICIENCY: 4, FORTUNE: 3, MENDING: 1}}
+      - {material: DIAMOND_BLOCK, min: 2, max: 4, chance: 70}
+      - {material: TOTEM_OF_UNDYING, min: 1, max: 2, chance: 35}
+      - {material: ELYTRA, min: 1, max: 1, chance: 15}
+      - {material: SHULKER_BOX, min: 1, max: 1, chance: 30}
+      - {material: EXPERIENCE_BOTTLE, min: 20, max: 40, chance: 80}
+      - {material: BEACON, min: 1, max: 1, chance: 8}
+      # 自定义品质道具
+      - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 15, enchants: {SHARPNESS: 5, LOOTING: 3, FIRE_ASPECT: 2}, name: "&6&l绝世之刃", lore: "&7这把剑曾斩落无数敌人。\n&7攻击速度:+1"}
+      - {material: NETHERITE_AXE, min: 1, max: 1, chance: 10, enchants: {EFFICIENCY: 5, UNBREAKING: 3}, name: "&d&l开天巨斧", lore: "&7一斧劈开天地。\n&7挖掘速度:+2"}
+      - {material: ELYTRA, min: 1, max: 1, chance: 5, enchants: {UNBREAKING: 3}, name: "&b&l苍穹之翼", lore: "&7翱翔天际的翅膀。\n&7飞行速度:+3"}
+      # 特殊道具 (绝世级高概率)
+      - {material: FIRE_CHARGE, min: 1, max: 1, chance: 25, special: fireball_big}
+      - {material: BLAZE_ROD, min: 1, max: 1, chance: 22, special: lightning_wand}
+      - {material: TNT, min: 1, max: 1, chance: 20, special: tnt_charge}
+      - {material: FIREWORK_STAR, min: 1, max: 1, chance: 18, special: repulse_wave}
+      # 神器 (绝世级高概率随机刷新终极装备)
+      - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 18, artifact: celestial_blade}
+      - {material: NETHERITE_AXE, min: 1, max: 1, chance: 15, artifact: aegis_axe}
+      - {material: NETHERITE_AXE, min: 1, max: 1, chance: 14, artifact: vampire_fang}
+      - {material: BOW, min: 1, max: 1, chance: 15, artifact: draco_bow}
+      - {material: NETHERITE_CHESTPLATE, min: 1, max: 1, chance: 14, artifact: titan_chest}
+      - {material: NETHERITE_BOOTS, min: 1, max: 1, chance: 12, artifact: wind_boots}
+      # 附魔石 (绝世级必得高级石)
+      - {material: AMETHYST_SHARD, min: 1, max: 1, chance: 25, enchant-stone: exotic}
+      - {material: LAPIS_LAZULI, min: 1, max: 1, chance: 20, enchant-stone: normal}
+
+# ================================================
+#  特殊道具 (右键触发自定义效果)
+# ================================================
+special-items:
+  fireball_tnt:
+    material: FIRE_CHARGE
+    effect: FIREBALL
+    name: "&6&l震地火弹"
+    lore:
+      - "&7右键朝地面砸下, 引爆范围冲击。"
+      - "&7不伤自己, 对周围玩家造成 &c半心 &7伤害,"
+      - "&7并按 TNT 力度把其他玩家炸飞。"
+    radius: 4.0
+    damage: 0.5
+    velocity: 1.6
+  fireball_big:
+    material: FIRE_CHARGE
+    effect: FIREBALL
+    name: "&d&l烈焰震地弹"
+    lore:
+      - "&7右键朝地面砸下, 大范围爆炸。"
+      - "&7不伤自己, 对周围玩家造成 &c半心 &7伤害,"
+      - "&7并把其他玩家炸飞得更远。"
+    radius: 6.0
+    damage: 0.5
+    velocity: 2.2
+  heal_potion:
+    material: POTION
+    effect: HEAL
+    name: "&a&l回春药剂"
+    lore:
+      - "&7右键使用, 恢复范围内生命。"
+      - "&7为自己和附近玩家回复 4~8 心。"
+    radius: 5.0
+  lightning_wand:
+    material: BLAZE_ROD
+    effect: LIGHTNING
+    name: "&b&l引雷杖"
+    lore:
+      - "&7右键朝准星方向召来落雷。"
+      - "&7对范围内敌人造成高额伤害。"
+    radius: 4.0
+    damage: 1.5
+  speed_charge:
+    material: SUGAR
+    effect: SPEED
+    name: "&e&l疾风冲锋"
+    lore:
+      - "&7右键使用, 获得速度提升。"
+      - "&7持续 12 秒。"
+    duration-seconds: 12
+  jump_charge:
+    material: RABBIT_FOOT
+    effect: JUMP
+    name: "&a&l弹跳强化"
+    lore:
+      - "&7右键使用, 获得跳跃提升。"
+      - "&7持续 12 秒。"
+    duration-seconds: 12
+  freeze_crystal:
+    material: ICE
+    effect: FREEZE
+    name: "&b&l冰霜禁锢"
+    lore:
+      - "&7右键使用, 冻结周围敌人。"
+      - "&7使其减速并发光 8 秒。"
+    radius: 5.0
+    duration-seconds: 8
+  shield_charge:
+    material: SHIELD
+    effect: SHIELD
+    name: "&f&l护盾结晶"
+    lore:
+      - "&7右键使用, 获得抗性提升。"
+      - "&7持续 10 秒。"
+    duration-seconds: 10
+  fire_res_charge:
+    material: BLAZE_POWDER
+    effect: FIRE_RES
+    name: "&c&l火焰抗性药水"
+    lore:
+      - "&7右键使用, 获得防火buff。"
+      - "&7持续 20 秒。"
+    duration-seconds: 20
+  tnt_charge:
+    material: TNT
+    effect: TNT_LAUNCH
+    name: "&6&l投掷TNT"
+    lore:
+      - "&7右键朝准星方向投掷抛物线TNT。"
+      - "&7落地后爆炸, 炸飞范围内玩家。"
+    radius: 3.0
+    damage: 0.0
+    velocity: 1.0
+  repulse_wave:
+    material: FIREWORK_STAR
+    effect: REPULSE
+    name: "&e&l击退波"
+    lore:
+      - "&7右键使用, 产生击退波。"
+      - "&7把周围玩家炸飞, 不造成伤害。"
+    radius: 8.0
+    damage: 0.0
+    velocity: 1.4
+
+# ================================================
+#  神器配置 (自动生成的传说装备)
+# ================================================
+artifacts:
+  celestial_blade:
+    name: "&6&l星辰之刃"
+    description: "&7传说武器, 附带火焰加成"
+    effect: "attack_damage +2, fire_aspect +1"
+  aegis_axe:
+    name: "&e&l神盾巨斧"
+    description: "&7重型武器, 附带击退"
+    effect: "attack_damage +3, knockback +2"
+  draco_bow:
+    name: "&d&l龙息弓"
+    description: "&7传说弓, 附带穿透"
+    effect: "power +4, punch +2"
+  titan_chest:
+    name: "&6&l泰坦胸甲"
+    description: "&7传说护甲, 附带抗性"
+    effect: "protection +4, durability +50%"
+  wind_boots:
+    name: "&b&l疾风之靴"
+    description: "&7传说靴子, 附带速度"
+    effect: "speed +2, jump_boost +1"
+  vampire_fang:
+    name: "&c&l吸血鬼獠牙"
+    description: "&7传说武器, 附带吸血"
+    effect: "lifesteal +3, attack_damage +2"
+
+# ==================== 毒圈配置 ====================
+storm:
+  enabled: true
+  phases: 5                              # 收缩次数 (共5次)
+  shrink-factor: 0.6                     # 每次收缩半径比例 (0.6 = 缩小40%)
+  wait-seconds: 60                       # 每圈停留时间 (秒)
+  shrink-duration-seconds: 40            # 收缩持续时间 (秒)
+  damage-per-second: 1.0                 # 基础伤害 (心/秒)
+  damage-increase-per-phase: 1.0         # 每阶段增加伤害 (心/秒)
+  initial-radius-factor: 0.95            # 初始圈半径比例 (相对地图边界)
+
+  # 粒子效果
+  particles-enabled: true
+  particles-interval-ticks: 4
+  particles-boundary-enabled: true
+  particles-boundary-density: 3
+  particles-view-range: 48
+  particles-fog-enabled: true
+  particles-fog-density: 1.0
+
+# ==================== 消息配置 ====================
+messages:
+  # 通用消息
+  prefix: ""
+  no-permission: "&c你没有权限执行此命令。"
+  player-only: "&c此命令只能由玩家执行。"
+  not-ready: "&c系统正在初始化中, 请稍候..."
+  reloaded: "&a配置已重新加载。"
+
+  # 对局消息
+  game-started: "&e§l===== 对局开始 =====&r&e"
+  game-ending: "&e§l===== 对局结束 =====&r&e"
+  game-winner: "&e§l胜利者: &6%player%"
+  game-teams: "&e§l当前队伍人数: &6%solo=&r%solo% &e| &6pvp=&r%pvp% &e| &6team=&r%team%"
+  game-status: "&e当前对局状态: &6%state% &e| 存活: &6%alive%/%total%"
+  game-join: "&a你已成功加入对局! &e等待管理员开始。"
+  game-stop: "&c对局已停止。"
+
+  # 地形选择
+  terrain-selected: "&a已选择地形: &6%terrain% §7(世界: &e%world%§7)"
+  terrain-failed: "&c地形世界创建失败, 请检查控制台日志。"
+
+  # 箱子消息
+  box-distribution: "&e地图物资箱分布 (共 &a%count%§e 个):"
+  box-looted: "&a开箱成功! &e获得 %item% x%amount%"
+  box-emptied-self: "&e你的背包已满, 无法开箱。"
+  box-emptied-other: "&c其他玩家背包已满, 无法开箱。"
+  protected-block: "&c此方块受到保护, 无法破坏。"
+
+  # 狩猎消息
+  hunt-none: "&e附近没有可追踪的猎物。"
+  hunt-found: "&e发现猎物踪迹! &a追踪中..."
+
+  # 售卖消息
+  sell-empty: "&c背包中没有可售卖的物品。"
+  sell-done: "&a售卖成功! &e获得 &6%amount% &a金币"
+
+  # 重生消息
+  respawn-cooldown: "&e重生冷却中, 请等待 &6%seconds% &e秒..."
+  respawn-not-ready: "&c当前无法重生, 请稍候。"
+  respawn-found: "&a重生点已找到!"
+  respawn-fail: "&c重生点未找到, 请联系管理员。"
+
+  # 排行榜消息
+  top-header: "&e§l===== 排行榜 =====&r&e"
+  top-line: "&6%rank%. &e%player% &7- &a击杀:%kills% &c死亡:%deaths%"
+
+  # 毒圈消息
+  storm-start: "&e§l===== 毒圈启动 =====&r&e §7| §a第§e1§7/§a%{phase}% §7圈 §7停留§e%{seconds}§7秒后收缩"
+  storm-shrink: "&e§l===== 毒圈收缩 =====&r&e §7| §a第§e%{phase}% §7圈 §7开始收缩 §7持续§e%{seconds}§7秒"
+  storm-shrink-done: "&e§l===== 毒圈稳定 =====&r&e §7| §a第§e%{phase}% §7圈 §7收缩完成 §7接下来停留§e%{seconds}§7秒"
+  storm-outside: "&c你处于毒圈外! §7朝§e%direction%§7走§a%distance%§7格入圈"
+  storm-inside: "&a你在安全区内 §7距边界§e%distance%§7格"
+  storm-damage: "&c中毒! 受到§e%damage%§c点伤害"
+  killed-player: "&e你击杀了 &6%victim%"
+
+  # 房间消息
+  room-joined: "&a已加入房间 &6%room%"
+  room-left: "&c已离开房间。"
+  room-full: "&c房间已满员。"
+
+  # 空投消息
+  airdrop-caught: "&e空投已被你拾取!"
+  airdrop-failed: "&c空投掉落失败, 请重试。"
+
+  # 商店消息
+  shop-opened: "&e商店已打开"
+  shop-bought: "&a购买成功! &e获得 &6%item%"
+  shop-sold: "&a出售成功! &e获得 &6%amount% 金币"
