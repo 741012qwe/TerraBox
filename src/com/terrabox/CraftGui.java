@@ -304,8 +304,11 @@ public class CraftGui {
         return plugin.artifacts().nameOf(key);
     }
 
-    /** & 码 → § 码 (GUI 显示用) */
+    /** & 码 → § 码 (使用Adventure序列化器) */
     private static String amp(String s) {
-        return s == null ? "" : s.replace('&', '\u00A7');
+        if (s == null) return "";
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+                .legacyAmpersand().serialize(
+                    net.kyori.adventure.text.Component.text(s));
     }
 }
