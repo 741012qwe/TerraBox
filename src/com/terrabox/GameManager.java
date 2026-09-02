@@ -156,7 +156,7 @@ public class GameManager {
 
     public void toggleJoin(Player p) {
         if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage("§c对局正在进行中, 无法报名。");
+            p.sendMessage(plugin.msg("game-in-progress"));
             return;
         }
         UUID u = p.getUniqueId();
@@ -165,7 +165,7 @@ public class GameManager {
             joinOrder.remove(u);
             players.remove(u);
             eliminated.remove(u);
-            p.sendMessage("§c已退出报名。");
+            p.sendMessage(plugin.msg("lobby-exit"));
         } else {
             joined.add(u);
             joinOrder.add(u);

@@ -46,3 +46,4 @@
 /var/minis/workspace/terrabox/src/com/terrabox/database/MigrationHelper.java
 /var/minis/workspace/terrabox/src/com/terrabox/database/MySQLProvider.java
 /var/minis/workspace/terrabox/src/com/terrabox/database/SQLiteProvider.java
+/var/minis/workspace/terrabox/src/com/terrabox/Messages.java
