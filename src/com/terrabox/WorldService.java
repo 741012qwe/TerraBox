@@ -159,15 +159,18 @@ public class WorldService implements Listener {
         w.getWorldBorder().setDamageAmount(1.0);
     }
 
-    /** 永远白天: 禁昼夜循环 + 锁定正午 (Folia兼容版本) */
+    /** 永远白天: 禁昼夜循环 + 锁定正午 */
     private void forceDaytime(World w) {
         try {
             w.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
         } catch (Throwable t) {
-            // Folia可能不支持某些游戏规则, 静默忽略
+            plugin.getLogger().warning("设置 禁昼夜循环 失败: " + t.getMessage());
         }
-        // Folia不允许在global线程设置世界时间, 移除时间锁定
-        // 改为通过插件监听器在每个区域线程内设置
+        try {
+            w.setTime(6000);
+        } catch (Throwable t) {
+            plugin.getLogger().warning("设置时间锁定失败: " + t.getMessage());
+        }
     }
 
     // ==================== 自动预生成 (每世界独立, 高吞吐 1200/s) ====================
