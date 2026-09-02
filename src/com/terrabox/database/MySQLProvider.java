@@ -5,15 +5,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class MySQLProvider implements DatabaseProvider {
-    private Connection connection;
     private final String url;
-    private final String user;
-    private final String pass;
+    private final String username;
+    private final String password;
+    private Connection connection;
 
-    public MySQLProvider(String url, String user, String pass) {
+    public MySQLProvider(String url, String username, String password) {
         this.url = url;
-        this.user = user;
-        this.pass = pass;
+        this.username = username;
+        this.password = password;
     }
 
     @Override
@@ -23,10 +23,12 @@ public class MySQLProvider implements DatabaseProvider {
         } catch (ClassNotFoundException e) {
             throw new SQLException("MySQL JDBC驱动未找到: " + e.getMessage());
         }
-        // 连接池参数优化
-        String connectUrl = url + "?useSSL=" + (url.contains("ssl=true") ? "true" : "false") +
-                           "&connectTimeout=5000&socketTimeout=10000&autoReconnect=true";
-        connection = DriverManager.getConnection(connectUrl, user, pass);
+        String connUrl = url + "?connectTimeout=5000&socketTimeout=10000&autoReconnect=true";
+        connection = DriverManager.getConnection(connUrl, username, password);
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("SET NAMES utf8mb4");
+            stmt.execute("SET CHARACTER SET utf8mb4");
+        }
         createTables();
     }
 
@@ -51,9 +53,13 @@ public class MySQLProvider implements DatabaseProvider {
         return "MySQL";
     }
 
+    @Override
+    public Connection getConnection() {
+        return connection;
+    }
+
     private void createTables() throws SQLException {
         try (Statement stmt = connection.createStatement()) {
-            // 玩家数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS players (" +
                 "uuid VARCHAR(36) PRIMARY KEY," +
                 "name VARCHAR(32) NOT NULL," +
@@ -61,10 +67,8 @@ public class MySQLProvider implements DatabaseProvider {
                 "deaths INTEGER DEFAULT 0," +
                 "stats TEXT," +
                 "inventory TEXT," +
-                "last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
-                "INDEX idx_last_login (last_login)" +
+                "last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-            // 箱子数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS boxes (" +
                 "id VARCHAR(36) PRIMARY KEY," +
                 "world VARCHAR(64) NOT NULL," +
@@ -75,7 +79,6 @@ public class MySQLProvider implements DatabaseProvider {
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "INDEX idx_world (world)" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-            // 对局数据表
             stmt.execute("CREATE TABLE IF NOT EXISTS games (" +
                 "id VARCHAR(36) PRIMARY KEY," +
                 "state VARCHAR(16) NOT NULL," +
@@ -88,21 +91,17 @@ public class MySQLProvider implements DatabaseProvider {
         }
     }
 
-    /** 安全查询 */
     public ResultSet query(String sql) throws SQLException {
         return connection.prepareStatement(sql).executeQuery();
     }
 
-    /** 安全更新 */
     public int update(String sql) throws SQLException {
         return connection.prepareStatement(sql).executeUpdate();
     }
 
-    /** 参数化查询 */
     public Map<String, Object> getPlayerData(String uuid) throws SQLException {
         Map<String, Object> data = new HashMap<>();
-        String sql = "SELECT uuid, name, kills, deaths, stats, inventory, last_login " +
-                     "FROM players WHERE uuid = ?";
+        String sql = "SELECT uuid, name, kills, deaths, stats, inventory, last_login FROM players WHERE uuid = ?";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, uuid);
             try (ResultSet rs = ps.executeQuery()) {
@@ -120,13 +119,8 @@ public class MySQLProvider implements DatabaseProvider {
         return data;
     }
 
-    /** 参数化保存 */
     public void savePlayer(String uuid, String name, int kills, int deaths, String stats, String inventory) throws SQLException {
-        String sql = "INSERT INTO players (uuid, name, kills, deaths, stats, inventory, last_login) " +
-                     "VALUES (?, ?, ?, ?, ?, ?, NOW()) " +
-                     "ON DUPLICATE KEY UPDATE " +
-                     "name=VALUES(name), kills=VALUES(kills), deaths=VALUES(deaths), " +
-                     "stats=VALUES(stats), inventory=VALUES(inventory)";
+        String sql = "INSERT INTO players (uuid, name, kills, deaths, stats, inventory, last_login) VALUES (?, ?, ?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE name=VALUES(name), kills=VALUES(kills), deaths=VALUES(deaths), stats=VALUES(stats), inventory=VALUES(inventory), last_login=NOW()";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, uuid);
             ps.setString(2, name);
