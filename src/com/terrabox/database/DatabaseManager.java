@@ -15,6 +15,12 @@ public class DatabaseManager {
     }
 
     public void initialize() {
+        // 确保插件数据目录存在
+        java.io.File dataFolder = plugin.getDataFolder();
+        if (!dataFolder.exists()) {
+            dataFolder.mkdirs();
+        }
+
         ConfigurationSection dbConfig = plugin.getConfig().getConfigurationSection("database");
         if (dbConfig == null) {
             provider = new SQLiteProvider(defaultDbPath);

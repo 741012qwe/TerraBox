@@ -51,13 +51,67 @@ public class ArenaManager {
         return currentId != null ? Bukkit.getWorld(currentId) : null;
     }
 
-    /** 创建/加载指定名字+地形的世界 (Global 线程调用) */
+    /** 创建/加载指定名字+地形的世界 (必须在 Global 线程调用) */
     public World create(String name, TerrainType type) {
+        return create(name, type, false);
+    }
+
+    /** 创建/加载指定名字+地形的世界 (Global 线程调用) */
+    public World create(String name, TerrainType type, boolean asyncSafe) {
+        // 已在 Global 线程或异步安全模式: 直接创建
+        if (!asyncSafe) {
+            World existing = Bukkit.getWorld(name);
+            if (existing != null) {
+                arenaTerrain.put(name, type);
+                if (!arenas.contains(name)) arenas.add(name);
+                if (type == TerrainType.NORMAL) {
+                    plugin.getLogger().warning("[TerraBox] 世界 " + name + " 已存在(可能是旧地形生成产物)。"
+                            + " 若需以原版生成器重新生成完整地貌, 请删除 world/" + name + " 文件夹后重启。");
+                }
+                return existing;
+            }
+            return createWorld(name, type);
+        }
+
+        // 异步安全模式: 必须通过 GlobalRegionScheduler
+        java.util.concurrent.atomic.AtomicReference<World> result = new java.util.concurrent.atomic.AtomicReference<>(null);
+        java.util.concurrent.atomic.AtomicReference<Throwable> error = new java.util.concurrent.atomic.AtomicReference<>(null);
+
+        Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
+            try {
+                World existing = Bukkit.getWorld(name);
+                if (existing != null) {
+                    arenaTerrain.put(name, type);
+                    if (!arenas.contains(name)) arenas.add(name);
+                    result.set(existing);
+                    return;
+                }
+                result.set(createWorld(name, type));
+            } catch (Throwable t) {
+                error.set(t);
+                plugin.getLogger().severe("[TerraBox] 创建世界失败: " + name + " - " + t.getMessage());
+                t.printStackTrace();
+            }
+        });
+
+        // 等待任务完成 (阻塞当前线程)
+        while (result.get() == null && error.get() == null) {
+            try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+        }
+
+        if (error.get() != null) {
+            throw new RuntimeException("创建世界失败: " + error.get().getMessage(), error.get());
+        }
+
+        return result.get();
+    }
+
+    /** 实际创建世界的内部方法 (必须在 Global 线程调用) */
+    private World createWorld(String name, TerrainType type) {
         World existing = Bukkit.getWorld(name);
         if (existing != null) {
             arenaTerrain.put(name, type);
             if (!arenas.contains(name)) arenas.add(name);
-            // 正常主世界(原版生成器)若已存在, 提示可能是旧手搓地形生成产物
             if (type == TerrainType.NORMAL) {
                 plugin.getLogger().warning("[TerraBox] 世界 " + name + " 已存在(可能是旧地形生成产物)。"
                         + " 若需以原版生成器重新生成完整地貌, 请删除 world/" + name + " 文件夹后重启。");
@@ -68,7 +122,6 @@ public class ArenaManager {
         // 恶地: 使用自定义生成器生成纯正恶地 (红沙/彩陶瓦/平顶山丘), 确保是真正的恶地地貌。
         WorldCreator creator = WorldCreator.name(name).environment(type.environment());
         if (type == TerrainType.NORMAL) {
-            // 原版生成器: 不调用 .generator(...), 显式原版类型(非超平坦), 生成完整原版地貌
             creator.type(org.bukkit.WorldType.NORMAL);
         } else {
             creator.generator(new CustomTerrainGenerator(plugin, type));
