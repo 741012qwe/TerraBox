@@ -427,6 +427,26 @@ artifacts:
     description: "&7传说武器, 附带吸血"
     effect: "lifesteal +3, attack_damage +2"
 
+# ==================== 毒圈配置 ====================
+storm:
+  enabled: true
+  phases: 5                              # 收缩次数 (共5次)
+  shrink-factor: 0.6                     # 每次收缩半径比例 (0.6 = 缩小40%)
+  wait-seconds: 60                       # 每圈停留时间 (秒)
+  shrink-duration-seconds: 40            # 收缩持续时间 (秒)
+  damage-per-second: 1.0                 # 基础伤害 (心/秒)
+  damage-increase-per-phase: 1.0         # 每阶段增加伤害 (心/秒)
+  initial-radius-factor: 0.95            # 初始圈半径比例 (相对地图边界)
+
+  # 粒子效果
+  particles-enabled: true
+  particles-interval-ticks: 4
+  particles-boundary-enabled: true
+  particles-boundary-density: 3
+  particles-view-range: 48
+  particles-fog-enabled: true
+  particles-fog-density: 1.0
+
 # ==================== 消息配置 ====================
 messages:
   # 通用消息
@@ -474,8 +494,13 @@ messages:
   top-header: "&e§l===== 排行榜 =====&r&e"
   top-line: "&6%rank%. &e%player% &7- &a击杀:%kills% &c死亡:%deaths%"
 
-  # 战斗消息
-  killed-by: "&c被 &6%killer% &c击杀!"
+  # 毒圈消息
+  storm-start: "&e§l===== 毒圈启动 =====&r&e §7| §a第§e1§7/§a%{phase}% §7圈 §7停留§e%{seconds}§7秒后收缩"
+  storm-shrink: "&e§l===== 毒圈收缩 =====&r&e §7| §a第§e%{phase}% §7圈 §7开始收缩 §7持续§e%{seconds}§7秒"
+  storm-shrink-done: "&e§l===== 毒圈稳定 =====&r&e §7| §a第§e%{phase}% §7圈 §7收缩完成 §7接下来停留§e%{seconds}§7秒"
+  storm-outside: "&c你处于毒圈外! §7朝§e%direction%§7走§a%distance%§7格入圈"
+  storm-inside: "&a你在安全区内 §7距边界§e%distance%§7格"
+  storm-damage: "&c中毒! 受到§e%damage%§c点伤害"
   killed-player: "&e你击杀了 &6%victim%"
 
   # 房间消息
