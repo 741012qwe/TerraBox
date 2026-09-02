@@ -241,7 +241,8 @@ public final class TerraBoxPlugin extends JavaPlugin {
                 .legacyAmpersand().deserialize(raw);
     }
 
-    private static String amp(String s) {
+    /** 将 & 颜色代码转换为 § 格式 (使用 Adventure 序列化器) */
+    public String amp(String s) {
         if (s == null) return "";
         // 直接使用Adventure序列化器处理颜色代码
         return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
