@@ -485,8 +485,8 @@ messages:
   sell-done: "&a售卖成功! &e获得 &6%amount% &a金币"
 
   # 重生消息
-  cooldown: "&e重生冷却中, 请等待 &6%seconds% &e秒..."
-  not-ready: "&c当前无法重生, 请稍候。"
+  respawn-cooldown: "&e重生冷却中, 请等待 &6%seconds% &e秒..."
+  respawn-not-ready: "&c当前无法重生, 请稍候。"
   respawn-found: "&a重生点已找到!"
   respawn-fail: "&c重生点未找到, 请联系管理员。"
 
