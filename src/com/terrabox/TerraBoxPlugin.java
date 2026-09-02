@@ -223,13 +223,21 @@ public final class TerraBoxPlugin extends JavaPlugin {
         return ""; // 不使用前缀,直接显示消息
     }
 
+    /** 读取并转换消息 (自动将 & 转换为 §) */
     public String msg(String key) {
         String raw = getConfig().getString("messages." + key, key);
-        return raw; // 已移除prefix,直接返回消息内容
+        return convertColorCode(raw);
     }
 
+    /** 返回原始消息 (不做颜色转换) */
     public String raw(String key) {
         return getConfig().getString("messages." + key, key);
+    }
+
+    /** 将 & 颜色代码转换为 § 格式 */
+    public static String convertColorCode(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.replace("&", "§");
     }
 
     public net.kyori.adventure.text.Component component(String key, String... kv) {
