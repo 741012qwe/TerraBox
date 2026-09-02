@@ -141,7 +141,10 @@ public class BoxManager {
                 try { w.setChunkForceLoaded(cx, cz, true); } catch (Throwable ignored) {}
                 Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
                     try {
-                        plugin.getLogger().info("物资箱放置任务执行: 尝试(" + fx + "," + fz + ")");
+                        // 每100个箱子打印一次进度, 避免刷屏
+                        if (attempt == 1 && fx % 100 == 0) {
+                            plugin.getLogger().info("物资箱投放进度: 已尝试 " + (fx / 100) + "00 个位置...");
+                        }
                         tryPlace(w, fx, fz, rarity, airdrop, after, fa, ft);
                     } catch (Throwable ex) {
                         plugin.getLogger().warning("物资箱放置异常 (" + fx + "," + fz + "): " + ex);
