@@ -156,7 +156,7 @@ public class GameManager {
 
     public void toggleJoin(Player p) {
         if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage(plugin.msg("prefix") + "§c对局正在进行中, 无法报名。");
+            p.sendMessage("§c对局正在进行中, 无法报名。");
             return;
         }
         UUID u = p.getUniqueId();
@@ -165,13 +165,13 @@ public class GameManager {
             joinOrder.remove(u);
             players.remove(u);
             eliminated.remove(u);
-            p.sendMessage(plugin.msg("prefix") + "§c已退出报名。");
+            p.sendMessage("§c已退出报名。");
         } else {
             joined.add(u);
             joinOrder.add(u);
             players.add(u);
             eliminated.remove(u);
-            p.sendMessage(plugin.msg("prefix") + "§a报名成功! 当前报名人数: §e" + joined.size()
+            p.sendMessage("§a报名成功! 当前报名人数: §e" + joined.size()
                     + "§a, 等管理员开始对局 (模式: " + modeDisplay() + ")");
             playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
         }
@@ -180,7 +180,7 @@ public class GameManager {
     /** 无条件加入报名 (用于接受邀请/强制加入); @return 是否成功 */
     public boolean join(Player p) {
         if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage(plugin.msg("prefix") + "§c对局正在进行中, 无法加入。");
+            p.sendMessage("§c对局正在进行中, 无法加入。");
             return false;
         }
         UUID u = p.getUniqueId();
@@ -189,7 +189,7 @@ public class GameManager {
         joinOrder.add(u);
         players.add(u);
         eliminated.remove(u);
-        p.sendMessage(plugin.msg("prefix") + "§a已加入房间 §e" + roomId + " §a报名! 当前报名人数: §e"
+        p.sendMessage("§a已加入房间 §e" + roomId + " §a报名! 当前报名人数: §e"
                 + joined.size() + "§a, 等管理员开始 (模式: " + modeDisplay() + ")");
         playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
         return true;
@@ -203,7 +203,7 @@ public class GameManager {
         joinOrder.remove(u);
         players.remove(u);
         eliminated.remove(u);
-        p.sendMessage(plugin.msg("prefix") + "§c已退出房间 §e" + roomId + " §c报名。");
+        p.sendMessage("§c已退出房间 §e" + roomId + " §c报名。");
         return true;
     }
 
@@ -216,7 +216,7 @@ public class GameManager {
 
     public void startGame(org.bukkit.command.CommandSender sender, Mode m) {
         if (state == State.COUNTDOWN || state == State.RUNNING) {
-            sender.sendMessage(plugin.msg("prefix") + "§c已有对局在进行中 (" + stateDisplay() + ")");
+            sender.sendMessage("§c已有对局在进行中 (" + stateDisplay() + ")");
             return;
         }
         this.mode = m;
@@ -235,14 +235,14 @@ public class GameManager {
         // 单人模式: 管理元可开 (不限人数); 对战/组队需至少 2 人
         int minPlayers = Math.max(2, plugin.getConfig().getInt("game.min-players", 2));
         if (players.size() < 1) {
-            sender.sendMessage(plugin.msg("prefix") + "§c参战人数不足, 请先 /box game join 报名。");
+            sender.sendMessage("§c参战人数不足, 请先 /box game join 报名。");
             joined.clear();
             joinOrder.clear();
             players.clear();
             return;
         }
         if (mode != Mode.SOLO && players.size() < minPlayers) {
-            sender.sendMessage(plugin.msg("prefix") + "§c参战人数不足 (" + players.size() + "/" + minPlayers
+            sender.sendMessage("§c参战人数不足 (" + players.size() + "/" + minPlayers
                     + "), 对战/组队模式至少需 2 人。");
             joined.clear();
             joinOrder.clear();
@@ -277,10 +277,10 @@ public class GameManager {
 
     public void stopGame(org.bukkit.command.CommandSender sender) {
         if (state == State.IDLE) {
-            sender.sendMessage(plugin.msg("prefix") + "§c当前没有进行中的对局。");
+            sender.sendMessage("§c当前没有进行中的对局。");
             return;
         }
-        sender.sendMessage(plugin.msg("prefix") + "§e管理员终止对局, 正在恢复地形...");
+        sender.sendMessage("§e管理员终止对局, 正在恢复地形...");
         finish("管理员终止对局", null, List.of());
     }
 
@@ -391,8 +391,7 @@ public class GameManager {
                     var it = plugin.specialItems().buildItem("enemy_tracker");
                     if (it != null) {
                         p.getInventory().addItem(it);
-                        p.sendMessage(plugin.msg("prefix")
-                                + "§e对局已进行 §a" + (grantAfterMs / 60_000L) + " §e分钟! §f发放 §a追踪罗盘 §f×1, "
+                        p.sendMessage("§e对局已进行 §a" + (grantAfterMs / 60_000L) + " §e分钟! §f发放 §a追踪罗盘 §f×1, "
                                 + "右键锁定一名敌人以追缉其方位!");
                         p.playSound(p.getLocation(), Sound.ITEM_TRIDENT_RETURN, 1.0f, 1.6f);
                     }
@@ -533,8 +532,7 @@ public class GameManager {
      */
     public boolean requestReturnToLobby(Player p) {
         if (!canLeaveToLobby(p)) {
-            p.sendMessage(plugin.msg("prefix")
-                    + "§c对局进行中, 不能返回大厅! " + (mode == Mode.SOLO
+            p.sendMessage("§c对局进行中, 不能返回大厅! " + (mode == Mode.SOLO
                     ? "" : "§7(被淘汰后可用 §e/box lobby §7回大厅)"));
             return false;
         }
@@ -599,7 +597,7 @@ public class GameManager {
                 plugin.econ().deposit(op, reward);
                 Player online = op.getPlayer();
                 if (online != null && online.isOnline()) {
-                    online.sendMessage(plugin.msg("prefix") + "§a获胜奖励 §e" + (long) reward + " §a元已发放!");
+                    online.sendMessage("§a获胜奖励 §e" + (long) reward + " §a元已发放!");
                 }
             }
         }

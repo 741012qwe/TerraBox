@@ -39,21 +39,21 @@ public class InviteManager {
     public boolean invite(Player owner, Player target, String roomId) {
         if (owner == null || target == null) return false;
         if (!plugin.rooms().hasRoom(roomId)) {
-            owner.sendMessage(plugin.msg("prefix") + "§c房间 " + roomId + " 不存在。");
+            owner.sendMessage("§c房间 " + roomId + " 不存在。");
             return false;
         }
         GameManager rg = plugin.rooms().get(roomId);
         if (rg != null && rg.owner() != null && !rg.owner().equals(owner.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c你不是房间 §e" + roomId + " §c的房主, 无法邀请。");
+            owner.sendMessage("§c你不是房间 §e" + roomId + " §c的房主, 无法邀请。");
             return false;
         }
         if (owner.getUniqueId().equals(target.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c不能邀请自己。");
+            owner.sendMessage("§c不能邀请自己。");
             return false;
         }
         if (target.getUniqueId().equals(owner.getUniqueId())) return false;
         if (plugin.rooms().isInGame(target.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c" + target.getName() + " 正在对局中, 无法邀请。");
+            owner.sendMessage("§c" + target.getName() + " 正在对局中, 无法邀请。");
             return false;
         }
         // 清理过期
@@ -62,7 +62,7 @@ public class InviteManager {
                 System.currentTimeMillis() + TTL));
         // 通知被邀请者 (可点击文本)
         sendInviteMessage(owner, target, roomId);
-        owner.sendMessage(plugin.msg("prefix") + "§a已邀请 §e" + target.getName() + " §a加入房间 §e"
+        owner.sendMessage("§a已邀请 §e" + target.getName() + " §a加入房间 §e"
                 + roomId + "§a, 等待回应...");
         owner.playSound(owner.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.4f);
         return true;
@@ -70,9 +70,8 @@ public class InviteManager {
 
     /** 发送可点击的邀请文本到被邀请者 */
     private void sendInviteMessage(Player owner, Player target, String roomId) {
-        String prefix = plugin.msg("prefix");
         Component msg = LegacyComponentSerializer.legacyAmpersand().deserialize(
-                prefix + "§e" + owner.getName() + " §7邀请你加入对局房间 §b" + roomId + "§7。");
+                "§e" + owner.getName() + " §7邀请你加入对局房间 §b" + roomId + "§7。");
         Component accept = LegacyComponentSerializer.legacyAmpersand().deserialize("§a[ 接受 ]")
                 .clickEvent(ClickEvent.runCommand("/box invite accept"))
                 .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize("§a点击接受邀请")));
@@ -88,22 +87,22 @@ public class InviteManager {
     public void accept(Player p) {
         Invite inv = invites.remove(p.getUniqueId());
         if (inv == null || System.currentTimeMillis() > inv.expires()) {
-            p.sendMessage(plugin.msg("prefix") + "§c当前没有待处理的邀请, 或邀请已过期。");
+            p.sendMessage("§c当前没有待处理的邀请, 或邀请已过期。");
             return;
         }
         GameManager g = plugin.rooms().get(inv.roomId());
         if (g == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c邀请的房间已不存在。");
+            p.sendMessage("§c邀请的房间已不存在。");
             return;
         }
         if (g.isRunning()) {
-            p.sendMessage(plugin.msg("prefix") + "§c该房间对局已开始, 无法加入。");
+            p.sendMessage("§c该房间对局已开始, 无法加入。");
             return;
         }
         if (g.join(p)) {
             Player owner = Bukkit.getPlayer(inv.owner());
             if (owner != null && owner.isOnline()) {
-                owner.sendMessage(plugin.msg("prefix") + "§a" + p.getName() + " §a接受了邀请, 已加入房间 §e"
+                owner.sendMessage("§a" + p.getName() + " §a接受了邀请, 已加入房间 §e"
                         + inv.roomId() + "§a!");
                 owner.playSound(owner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.3f);
             }
@@ -114,13 +113,13 @@ public class InviteManager {
     public void decline(Player p) {
         Invite inv = invites.remove(p.getUniqueId());
         if (inv == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c当前没有待处理的邀请。");
+            p.sendMessage("§c当前没有待处理的邀请。");
             return;
         }
-        p.sendMessage(plugin.msg("prefix") + "§7已拒绝房间邀请。");
+        p.sendMessage("§7已拒绝房间邀请。");
         Player owner = Bukkit.getPlayer(inv.owner());
         if (owner != null && owner.isOnline()) {
-            owner.sendMessage(plugin.msg("prefix") + "§c" + p.getName() + " §c拒绝了你的邀请。");
+            owner.sendMessage("§c" + p.getName() + " §c拒绝了你的邀请。");
         }
     }
 

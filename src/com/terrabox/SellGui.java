@@ -108,7 +108,7 @@ public class SellGui {
                 .replace("{count}", String.valueOf(count))
                 .replace("{money}", String.valueOf(money)));
         if (!rejected.isEmpty()) {
-            p.sendMessage(plugin.msg("prefix") + "§7以下物品暂不回收: §c" + String.join(", ", rejected));
+            p.sendMessage("§7以下物品暂不回收: §c" + String.join(", ", rejected));
         }
         p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_YES, 1f, 1.2f);
     }
@@ -127,6 +127,6 @@ public class SellGui {
         for (ItemStack rest : map.values()) {
             p.getWorld().dropItemNaturally(p.getLocation(), rest);
         }
-        p.sendMessage(plugin.msg("prefix") + "§7商店物品已退回背包(溢出掉落)。" + map.size());
+        p.sendMessage("§7商店物品已退回背包(溢出掉落)。" + map.size());
     }
 }

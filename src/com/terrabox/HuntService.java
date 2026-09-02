@@ -21,7 +21,7 @@ public class HuntService {
     public void hunt(Player p) {
         double cost = plugin.getConfig().getDouble("hunt.cost", 120);
         if (cost > 0 && !plugin.econ().withdraw(p, cost)) {
-            p.sendMessage(plugin.msg("prefix") + "§c货币不足, 寻宝需要 §e" + (long) cost + " §c元。");
+            p.sendMessage("§c货币不足, 寻宝需要 §e" + (long) cost + " §c元。");
             return;
         }
         List<Rarity> targets = new ArrayList<>();

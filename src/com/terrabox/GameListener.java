@@ -224,8 +224,8 @@ public class GameListener implements Listener {
 
         // 立即切换到旁观模式, 避免原版死亡动画/重生流程
         p.setGameMode(org.bukkit.GameMode.SPECTATOR);
-        p.sendMessage(plugin.msg("prefix") + "§e你已受伤倒地, 进入旁观模式!");
-        p.sendMessage(plugin.msg("prefix") + "§7输入 §a/box lobby §7返回大厅, 或 §f/box spectate §7继续旁观。");
+        p.sendMessage("§e你已受伤倒地, 进入旁观模式!");
+        p.sendMessage("§7输入 §a/box lobby §7返回大厅, 或 §f/box spectate §7继续旁观。");
     }
 
     /** PvP 伤害控制: 仅对局世界生效; SOLO 禁互伤; TEAM 同队免伤; 需双方都在本房间对局内 */

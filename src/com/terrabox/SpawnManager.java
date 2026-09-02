@@ -114,7 +114,7 @@ public class SpawnManager {
             p.sendMessage(plugin.msg("not-ready"));
             return;
         }
-        p.sendMessage(plugin.msg("prefix") + "§e正在为你寻找随机陆地出生点...");
+        p.sendMessage("§e正在为你寻找随机陆地出生点...");
         randomLand(loc -> {
             p.teleportAsync(loc).thenAccept(ok -> {
                 if (ok) p.sendMessage(plugin.msg("respawn-found"));

@@ -149,7 +149,7 @@ public class PortalManager implements Listener {
         lastPortal.put(p.getUniqueId(), System.currentTimeMillis());
         ensureLoaded(port.targetWorld(), tw -> {
             if (tw == null) {
-                p.sendMessage(plugin.msg("prefix") + "§c目标世界不可用。");
+                p.sendMessage("§c目标世界不可用。");
                 return;
             }
             int cx = 0, cz = 0; // 目标世界中央传送
@@ -159,8 +159,8 @@ public class PortalManager implements Listener {
                     // 主世界/末地目标地面 y 可能为虚空上方, 兜底用基岩层
                     Location loc = new Location(tw, cx + 0.5, ty + 1.2, cz + 0.5);
                     p.teleportAsync(loc).thenAccept(ok -> {
-                        if (ok) p.sendMessage(plugin.msg("prefix") + "§a欢迎来到: §f" + tw.getName());
-                        else p.sendMessage(plugin.msg("prefix") + "§c传送失败。");
+                        if (ok) p.sendMessage("§a欢迎来到: §f" + tw.getName());
+                        else p.sendMessage("§c传送失败。");
                     });
                 });
             });

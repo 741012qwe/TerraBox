@@ -150,7 +150,7 @@ public class EnchantManager {
         try { ench = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(enchName.toLowerCase(Locale.ROOT))); }
         catch (Throwable t) { ench = null; }
         if (ench == null) {
-            player.sendMessage(plugin.msg("prefix") + "§c未知附魔: " + enchName);
+            player.sendMessage("§c未知附魔: " + enchName);
             return false;
         }
         int level = levelOf(stone);
@@ -161,7 +161,7 @@ public class EnchantManager {
                 : player.getInventory().getItemInOffHand();
         // 不能对附魔石本身应用
         if (isEnchantStone(target)) {
-            player.sendMessage(plugin.msg("prefix") + "§c请在另一只手持有要附魔的装备 (不要两手都拿附魔石)。");
+            player.sendMessage("§c请在另一只手持有要附魔的装备 (不要两手都拿附魔石)。");
             return false;
         }
         if (target == null || target.getType().isAir()
@@ -177,7 +177,7 @@ public class EnchantManager {
                 && !target.getType().name().contains("_LEGGINGS")
                 && !target.getType().name().contains("_BOOTS")
                 && !target.getType().name().contains("TRIDENT")) {
-            player.sendMessage(plugin.msg("prefix") + "§c请手持一件可附魔的装备 (武器/工具/盔甲)。");
+            player.sendMessage("§c请手持一件可附魔的装备 (武器/工具/盔甲)。");
             return false;
         }
         // 应用附魔
@@ -187,11 +187,11 @@ public class EnchantManager {
             if (stoneInOff) player.getInventory().setItemInMainHand(target);
             else player.getInventory().setItemInOffHand(target);
             player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
-            player.sendMessage(plugin.msg("prefix") + "§a已为手持装备附魔: §f" + nameOf(ench)
+            player.sendMessage("§a已为手持装备附魔: §f" + nameOf(ench)
                     + " §7(等级 §e" + level + "§7)");
             return true; // 消耗附魔石
         } catch (Throwable t) {
-            player.sendMessage(plugin.msg("prefix") + "§c附魔失败: " + t.getMessage());
+            player.sendMessage("§c附魔失败: " + t.getMessage());
             return false;
         }
     }
@@ -236,26 +236,26 @@ public class EnchantManager {
         try { ench = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(enchName.toLowerCase(Locale.ROOT))); }
         catch (Throwable t) { ench = null; }
         if (ench == null) {
-            player.sendMessage(plugin.msg("prefix") + "§c未知附魔: " + enchName);
+            player.sendMessage("§c未知附魔: " + enchName);
             return false;
         }
         int level = levelOf(stone);
         if (targetEquip == null || targetEquip.getType().isAir()) {
-            player.sendMessage(plugin.msg("prefix") + "§c目标装备为空。");
+            player.sendMessage("§c目标装备为空。");
             return false;
         }
         if (isEnchantStone(targetEquip)) {
-            player.sendMessage(plugin.msg("prefix") + "§c目标不是可附魔装备。");
+            player.sendMessage("§c目标不是可附魔装备。");
             return false;
         }
         try {
             targetEquip.addUnsafeEnchantment(ench, level);
             player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
-            player.sendMessage(plugin.msg("prefix") + "§a已为装备附魔: §f" + nameOf(ench)
+            player.sendMessage("§a已为装备附魔: §f" + nameOf(ench)
                     + " §7(等级 §e" + level + "§7)");
             return true;
         } catch (Throwable t) {
-            player.sendMessage(plugin.msg("prefix") + "§c附魔失败: " + t.getMessage());
+            player.sendMessage("§c附魔失败: " + t.getMessage());
             return false;
         }
     }

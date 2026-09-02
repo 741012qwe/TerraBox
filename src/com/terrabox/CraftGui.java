@@ -163,7 +163,7 @@ public class CraftGui {
     public void craft(Player p, Inventory inv, GuiListener.GuiHolder holder) {
         List<CraftManager.Recipe> recipes = plugin.crafts().recipes();
         if (recipes.isEmpty()) {
-            p.sendMessage(plugin.msg("prefix") + "§c暂无可用配方。");
+            p.sendMessage("§c暂无可用配方。");
             return;
         }
         int idx = holder.craftIndex;
@@ -193,7 +193,7 @@ public class CraftGui {
         }
 
         if (!ok) {
-            p.sendMessage(plugin.msg("prefix") + "§c材料不足或缺失, 无法合成 "
+            p.sendMessage("§c材料不足或缺失, 无法合成 "
                     + nameOfart(recipe.artifact()) + "。");
             p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1.2f);
             // 多余材料退回背包; 让玩家保留已放好的 (不清空)
@@ -230,7 +230,7 @@ public class CraftGui {
         // 产出神器
         ItemStack out = plugin.artifacts().buildItem(recipe.artifact());
         if (out == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c神器构建失败, 材料已退还。");
+            p.sendMessage("§c神器构建失败, 材料已退还。");
             returnAlloc(inv, new ArrayList<>(), placed, p);
             render(p, inv, holder);
             return;
@@ -240,7 +240,7 @@ public class CraftGui {
         for (ItemStack rest : map.values()) {
             p.getWorld().dropItemNaturally(p.getLocation(), rest);
         }
-        p.sendMessage(plugin.msg("prefix") + "§a成功合成神器: §f" + nameOfart(recipe.artifact()) + "!");
+        p.sendMessage("§a成功合成神器: §f" + nameOfart(recipe.artifact()) + "!");
         p.playSound(p.getLocation(), Sound.ITEM_ARMOR_EQUIP_NETHERITE, 1f, 1.2f);
         // 退回多余材料
         returnAlloc(inv, leftovers, new LinkedHashMap<>(), p);
