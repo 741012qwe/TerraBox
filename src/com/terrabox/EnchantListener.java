@@ -1,5 +1,32 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Material
+ *  org.bukkit.entity.Player
+ *  org.bukkit.event.EventHandler
+ *  org.bukkit.event.EventPriority
+ *  org.bukkit.event.Listener
+ *  org.bukkit.event.block.Action
+ *  org.bukkit.event.inventory.ClickType
+ *  org.bukkit.event.inventory.InventoryClickEvent
+ *  org.bukkit.event.inventory.InventoryType
+ *  org.bukkit.event.player.PlayerInteractEntityEvent
+ *  org.bukkit.event.player.PlayerInteractEvent
+ *  org.bukkit.event.player.PlayerQuitEvent
+ *  org.bukkit.inventory.EquipmentSlot
+ *  org.bukkit.inventory.InventoryView
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.PlayerInventory
+ */
 package com.terrabox;
 
+import com.terrabox.CraftGui;
+import com.terrabox.SpecialItemManager;
+import com.terrabox.TerraBoxPlugin;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -9,242 +36,259 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 
-/**
- * 附魔石使用监听: 支持两种触发方式
- *   1. 手持附魔石右键 → 附魔另一只手的装备 (原有逻辑)
- *   2. 鼠标拿取附魔石 → 右键背包中的可附魔装备 (新增)
- *
- * 优先级: 特殊道具 > 附魔石
- *
- * 线程模型: 玩家区域线程 (白皮书 §6.1)
- */
-public class EnchantListener implements Listener {
+public class EnchantListener
+implements Listener {
     private final TerraBoxPlugin plugin;
-    /** 玩家UUID → 上次附魔应用时刻(ms), 防同一次右键的双事件重复应用 */
-    private final java.util.Map<java.util.UUID, Long> useCool = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, Long> useCool = new ConcurrentHashMap<UUID, Long>();
     private static final long COOL_MS = 200L;
 
-    public EnchantListener(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public EnchantListener(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    private boolean inCooldown(Player p) {
-        Long last = useCool.get(p.getUniqueId());
-        return last != null && System.currentTimeMillis() - last < COOL_MS;
+    private boolean inCooldown(Player player) {
+        Long l = this.useCool.get(player.getUniqueId());
+        return l != null && System.currentTimeMillis() - l < 200L;
     }
 
-    void markUse(Player p) {
-        useCool.put(p.getUniqueId(), System.currentTimeMillis());
+    void markUse(Player player) {
+        this.useCool.put(player.getUniqueId(), System.currentTimeMillis());
     }
 
-    /** 主手或副手是否持有附魔石 */
-    boolean holdsStone(Player p) {
-        if (plugin.enchants() == null) return false;
-        var inv = p.getInventory();
-        return isStone(inv.getItemInMainHand()) || isStone(inv.getItemInOffHand());
+    boolean holdsStone(Player player) {
+        if (this.plugin.enchants() == null) {
+            return false;
+        }
+        PlayerInventory playerInventory = player.getInventory();
+        return this.isStone(playerInventory.getItemInMainHand()) || this.isStone(playerInventory.getItemInOffHand());
     }
 
-    /** 主手或副手是否持有特殊道具 (若是, 本次右键让路给 SpecialItemListener) */
-    private boolean hasSpecialInHand(Player p) {
-        var si = plugin.specialItems();
-        if (si == null) return false;
-        var inv = p.getInventory();
+    private boolean hasSpecialInHand(Player player) {
+        SpecialItemManager specialItemManager = this.plugin.specialItems();
+        if (specialItemManager == null) {
+            return false;
+        }
+        PlayerInventory playerInventory = player.getInventory();
         try {
-            ItemStack m = inv.getItemInMainHand();
-            ItemStack o = inv.getItemInOffHand();
-            return (m != null && !m.getType().isAir() && si.isSpecial(m))
-                    || (o != null && !o.getType().isAir() && si.isSpecial(o));
-        } catch (Throwable t) {
+            ItemStack itemStack = playerInventory.getItemInMainHand();
+            ItemStack itemStack2 = playerInventory.getItemInOffHand();
+            return itemStack != null && !itemStack.getType().isAir() && specialItemManager.isSpecial(itemStack) || itemStack2 != null && !itemStack2.getType().isAir() && specialItemManager.isSpecial(itemStack2);
+        }
+        catch (Throwable throwable) {
             return false;
         }
     }
 
-    /** 尝试使用附魔石 (手持模式): 优先副手石→附魔主手装备; 否则主手石→附魔副手装备 */
-    private boolean tryUseHeldStone(Player p) {
-        if (plugin.enchants() == null) return false;
-        if (inCooldown(p)) return false;
-        if (hasSpecialInHand(p)) return false;
-        var inv = p.getInventory();
-        ItemStack main = inv.getItemInMainHand();
-        ItemStack off = inv.getItemInOffHand();
-        if (isStone(off)) { applyAndConsume(p, off, true); markUse(p); return true; }
-        if (isStone(main)) { applyAndConsume(p, main, false); markUse(p); return true; }
+    private boolean tryUseHeldStone(Player player) {
+        if (this.plugin.enchants() == null) {
+            return false;
+        }
+        if (this.inCooldown(player)) {
+            return false;
+        }
+        if (this.hasSpecialInHand(player)) {
+            return false;
+        }
+        PlayerInventory playerInventory = player.getInventory();
+        ItemStack itemStack = playerInventory.getItemInMainHand();
+        ItemStack itemStack2 = playerInventory.getItemInOffHand();
+        if (this.isStone(itemStack2)) {
+            this.applyAndConsume(player, itemStack2, true);
+            this.markUse(player);
+            return true;
+        }
+        if (this.isStone(itemStack)) {
+            this.applyAndConsume(player, itemStack, false);
+            this.markUse(player);
+            return true;
+        }
         return false;
     }
 
-    /**
-     * 背包点击模式: 玩家鼠标持有附魔石 → 右键背包中可附魔的装备 → 应用附魔并消耗
-     * @return true=已处理本次点击
-     */
-    private boolean tryApplyOnBagClick(Player p, InventoryView view, int slot,
-                                        ClickType click, ItemStack cursor, ItemStack target) {
-        if (plugin.enchants() == null) return false;
-        if (inCooldown(p)) return false;
-        if (hasSpecialInHand(p)) return false;
-        // 校验光标持有附魔石
-        if (cursor == null || cursor.getType().isAir() || !isStone(cursor)) return false;
-        // 校验目标格非空且非附魔石
-        if (target == null || target.getType().isAir()) return false;
-        if (isStone(target)) return false; // 不能对附魔石本身附魔
-        if (!canEnchant(target.getType())) return false;
-
-        // 只响应右键 (双击也允许, 普通左键不触发以避免误操作)
-        if (click != ClickType.RIGHT && click != ClickType.DOUBLE_CLICK) return false;
-
-        // 工作台输出槽和材料槽不触发
-        if (slot == CraftGui.OUTPUT_SLOT) return false;
-        for (int matSlot : CraftGui.MAT_SLOTS) { if (slot == matSlot) return false; }
-
-        // 背包点击模式: 根据光标(附魔石)判断"另一只手"的装备作为目标
-        // 如果光标来自副手(玩家用副手拿起), 则目标 = 主手装备
-        // 如果光标来自主手(玩家用主手拿起), 则目标 = 副手装备
-        // 简化处理: 先检查手上装备, 再遍历背包找第一个可附魔装备
-        var inv = p.getInventory();
-        ItemStack mainHand = inv.getItemInMainHand();
-        ItemStack offHand = inv.getItemInOffHand();
-        ItemStack targetEquip = null;
-        // 优先使用手上装备
-        if (mainHand != null && !mainHand.getType().isAir() && canEnchant(mainHand.getType()) && !isStone(mainHand)) {
-            targetEquip = mainHand;
-        } else if (offHand != null && !offHand.getType().isAir() && canEnchant(offHand.getType()) && !isStone(offHand)) {
-            targetEquip = offHand;
+    private boolean tryApplyOnBagClick(Player player, InventoryView inventoryView, int n, ClickType clickType, ItemStack itemStack, ItemStack itemStack2) {
+        ItemStack itemStack3;
+        int n2;
+        if (this.plugin.enchants() == null) {
+            return false;
+        }
+        if (this.inCooldown(player)) {
+            return false;
+        }
+        if (this.hasSpecialInHand(player)) {
+            return false;
+        }
+        if (itemStack == null || itemStack.getType().isAir() || !this.isStone(itemStack)) {
+            return false;
+        }
+        if (itemStack2 == null || itemStack2.getType().isAir()) {
+            return false;
+        }
+        if (this.isStone(itemStack2)) {
+            return false;
+        }
+        if (!this.canEnchant(itemStack2.getType())) {
+            return false;
+        }
+        if (clickType != ClickType.RIGHT && clickType != ClickType.DOUBLE_CLICK) {
+            return false;
+        }
+        if (n == 24) {
+            return false;
+        }
+        for (int itemStack6 : CraftGui.MAT_SLOTS) {
+            if (n != itemStack6) continue;
+            return false;
+        }
+        PlayerInventory playerInventory = player.getInventory();
+        ItemStack itemStack4 = playerInventory.getItemInMainHand();
+        ItemStack itemStack5 = playerInventory.getItemInOffHand();
+        ItemStack itemStack6 = null;
+        if (itemStack4 != null && !itemStack4.getType().isAir() && this.canEnchant(itemStack4.getType()) && !this.isStone(itemStack4)) {
+            itemStack6 = itemStack4;
+        } else if (itemStack5 != null && !itemStack5.getType().isAir() && this.canEnchant(itemStack5.getType()) && !this.isStone(itemStack5)) {
+            itemStack6 = itemStack5;
         } else {
-            // 遍历背包找第一个可附魔装备 (不含快捷栏0-8的盔甲槽, 因为那是装备槽)
-            for (int i = 9; i < 36; i++) {
-                ItemStack it = inv.getItem(i);
-                if (it != null && !it.getType().isAir() && canEnchant(it.getType()) && !isStone(it)) {
-                    targetEquip = it;
-                    break;
+            for (n2 = 9; n2 < 36; ++n2) {
+                itemStack3 = playerInventory.getItem(n2);
+                if (itemStack3 == null || itemStack3.getType().isAir() || !this.canEnchant(itemStack3.getType()) || this.isStone(itemStack3)) continue;
+                itemStack6 = itemStack3;
+                break;
+            }
+        }
+        if (itemStack6 == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u8bf7\u5728\u624b\u4e0a\u6216\u80cc\u5305\u4e2d\u51c6\u5907\u4e00\u4ef6\u53ef\u9644\u9b54\u7684\u88c5\u5907\u3002");
+            return false;
+        }
+        if (this.isStone(itemStack6)) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u76ee\u6807\u4e0d\u662f\u53ef\u9644\u9b54\u88c5\u5907\u3002");
+            return false;
+        }
+        n2 = this.plugin.enchants().applyToTarget(player, itemStack, itemStack6) ? 1 : 0;
+        if (n2 == 0) {
+            return false;
+        }
+        itemStack3 = itemStack.clone();
+        itemStack3.setAmount(itemStack3.getAmount() - 1);
+        if (itemStack3.getAmount() <= 0) {
+            inventoryView.setCursor(null);
+        } else {
+            inventoryView.setCursor(itemStack3);
+        }
+        this.markUse(player);
+        return true;
+    }
+
+    private boolean canEnchant(Material material) {
+        if (material == null || material.isAir()) {
+            return false;
+        }
+        String string = material.name();
+        return string.contains("_SWORD") || string.contains("_PICKAXE") || string.contains("_AXE") || string.contains("_SHOVEL") || string.contains("_HOE") || string.contains("_BOW") || string.contains("CROSSBOW") || string.contains("_HELMET") || string.contains("_CHESTPLATE") || string.contains("_LEGGINGS") || string.contains("_BOOTS") || string.contains("TRIDENT");
+    }
+
+    private boolean isStone(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType().isAir()) {
+            return false;
+        }
+        try {
+            return this.plugin.enchants().isEnchantStone(itemStack);
+        }
+        catch (Throwable throwable) {
+            return false;
+        }
+    }
+
+    private boolean applyAndConsume(Player player, ItemStack itemStack, boolean bl) {
+        boolean bl2 = this.plugin.enchants().apply(player, itemStack);
+        if (bl2) {
+            itemStack.setAmount(itemStack.getAmount() - 1);
+            PlayerInventory playerInventory = player.getInventory();
+            if (itemStack.getAmount() <= 0) {
+                if (bl) {
+                    playerInventory.setItemInOffHand(null);
+                } else {
+                    playerInventory.setItemInMainHand(null);
                 }
-            }
-        }
-        if (targetEquip == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c请在手上或背包中准备一件可附魔的装备。");
-            return false;
-        }
-        if (isStone(targetEquip)) {
-            p.sendMessage(plugin.msg("prefix") + "§c目标不是可附魔装备。");
-            return false;
-        }
-
-        // 执行附魔 (传入装备作为目标)
-        boolean applied = plugin.enchants().applyToTarget(p, cursor, targetEquip);
-        if (!applied) return false;
-
-        // 消耗附魔石: 从光标扣减
-        // cursor 是事件对象中的引用, 修改后会同步到游戏内光标显示
-        // 先 clone 一份再修改, 避免污染原对象
-        ItemStack newCursor = cursor.clone();
-        newCursor.setAmount(newCursor.getAmount() - 1);
-        if (newCursor.getAmount() <= 0) {
-            view.setCursor(null); // 附魔石用完, 清空光标
-        } else {
-            view.setCursor(newCursor); // 还有剩余, 更新光标显示
-        }
-        markUse(p);
-        return true;
-    }
-
-    /** 判断材质是否可附魔 */
-    private boolean canEnchant(Material mat) {
-        if (mat == null || mat.isAir()) return false;
-        String name = mat.name();
-        return name.contains("_SWORD") || name.contains("_PICKAXE")
-                || name.contains("_AXE") || name.contains("_SHOVEL") || name.contains("_HOE")
-                || name.contains("_BOW") || name.contains("CROSSBOW")
-                || name.contains("_HELMET") || name.contains("_CHESTPLATE")
-                || name.contains("_LEGGINGS") || name.contains("_BOOTS")
-                || name.contains("TRIDENT");
-    }
-
-    private boolean isStone(ItemStack it) {
-        if (it == null || it.getType().isAir()) return false;
-        try { return plugin.enchants().isEnchantStone(it); } catch (Throwable t) { return false; }
-    }
-
-    /** 应用附魔并消耗附魔石 (手持模式, 对应手数量-1) */
-    private boolean applyAndConsume(Player p, ItemStack stone, boolean stoneInOffHand) {
-        boolean applied = plugin.enchants().apply(p, stone);
-        if (applied) {
-            stone.setAmount(stone.getAmount() - 1);
-            var inv = p.getInventory();
-            if (stone.getAmount() <= 0) {
-                if (stoneInOffHand) inv.setItemInOffHand(null);
-                else inv.setItemInMainHand(null);
+            } else if (bl) {
+                playerInventory.setItemInOffHand(itemStack);
             } else {
-                if (stoneInOffHand) inv.setItemInOffHand(stone);
-                else inv.setItemInMainHand(stone);
+                playerInventory.setItemInMainHand(itemStack);
             }
         }
         return true;
     }
 
-    // ==================== 事件监听 ====================
-
-    /** 手持模式: 对空气/方块右键 */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
-    public void onInteract(PlayerInteractEvent e) {
-        Action a = e.getAction();
-        if (a != Action.RIGHT_CLICK_AIR && a != Action.RIGHT_CLICK_BLOCK) return;
-        // 只处理 HAND 事件, OFF_HAND 事件已含在主手事件中 (去重)
-        if (e.getHand() != null && e.getHand() != EquipmentSlot.HAND) return;
-        Player p = e.getPlayer();
-        if (hasSpecialInHand(p)) return;          // 让路特殊道具监听器
-        if (!holdsStone(p)) return;               // 无附魔石, 不干预
-        tryUseHeldStone(p);
-        e.setCancelled(true);                     // 只要持石就吞掉, 防止被放置/食用
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=false)
+    public void onInteract(PlayerInteractEvent playerInteractEvent) {
+        Action action = playerInteractEvent.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        if (playerInteractEvent.getHand() != null && playerInteractEvent.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        Player player = playerInteractEvent.getPlayer();
+        if (this.hasSpecialInHand(player)) {
+            return;
+        }
+        if (!this.holdsStone(player)) {
+            return;
+        }
+        this.tryUseHeldStone(player);
+        playerInteractEvent.setCancelled(true);
     }
 
-    /** 手持模式: 对实体右键 */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
-    public void onInteractEntity(PlayerInteractEntityEvent e) {
-        if (e.getHand() != null && e.getHand() != EquipmentSlot.HAND) return;
-        Player p = e.getPlayer();
-        if (hasSpecialInHand(p)) return;
-        if (!holdsStone(p)) return;
-        tryUseHeldStone(p);
-        e.setCancelled(true);
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=false)
+    public void onInteractEntity(PlayerInteractEntityEvent playerInteractEntityEvent) {
+        if (playerInteractEntityEvent.getHand() != null && playerInteractEntityEvent.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+        Player player = playerInteractEntityEvent.getPlayer();
+        if (this.hasSpecialInHand(player)) {
+            return;
+        }
+        if (!this.holdsStone(player)) {
+            return;
+        }
+        this.tryUseHeldStone(player);
+        playerInteractEntityEvent.setCancelled(true);
     }
 
-    /**
-     * 背包点击模式: 鼠标拿取附魔石 → 右键背包中的装备 → 应用附魔并消耗
-     * 优先级高于原版移动物品行为, 由 event.setCancelled(true) 接管
-     */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent e) {
-        Player p = (Player) e.getWhoClicked();
-        InventoryView view = e.getView();
-        int slot = e.getRawSlot();
-        ClickType click = e.getClick();
-
-        // 只处理玩家自己的界面 (排除其他实体的容器)
-        if (!(e.getInventory().getHolder() instanceof Player)) return;
-        if (view.getType() == InventoryType.CRAFTING) return; // 工作台交给 CraftManager
-
-        // 检查鼠标是否持有附魔石 (cursor = 玩家当前拿着的物品)
-        ItemStack cursor = e.getCursor();
-        if (cursor == null || cursor.getType().isAir() || !isStone(cursor)) return;
-        if (hasSpecialInHand(p)) return;
-
-        // 目标格 = 被点击的格子中的物品 (点击前状态, 由 Bukkit 在事件前更新)
-        // 注意: InventoryClickEvent 在 modify 之前触发, e.getCurrentItem() 返回原内容
-        ItemStack target = e.getCurrentItem();
-
-        if (tryApplyOnBagClick(p, view, slot, click, cursor, target)) {
-            e.setCancelled(true); // 阻止原版移动物品
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=true)
+    public void onInventoryClick(InventoryClickEvent inventoryClickEvent) {
+        Player player = (Player)inventoryClickEvent.getWhoClicked();
+        InventoryView inventoryView = inventoryClickEvent.getView();
+        int n = inventoryClickEvent.getRawSlot();
+        ClickType clickType = inventoryClickEvent.getClick();
+        if (!(inventoryClickEvent.getInventory().getHolder() instanceof Player)) {
+            return;
+        }
+        if (inventoryView.getType() == InventoryType.CRAFTING) {
+            return;
+        }
+        ItemStack itemStack = inventoryClickEvent.getCursor();
+        if (itemStack == null || itemStack.getType().isAir() || !this.isStone(itemStack)) {
+            return;
+        }
+        if (this.hasSpecialInHand(player)) {
+            return;
+        }
+        ItemStack itemStack2 = inventoryClickEvent.getCurrentItem();
+        if (this.tryApplyOnBagClick(player, inventoryView, n, clickType, itemStack, itemStack2)) {
+            inventoryClickEvent.setCancelled(true);
         }
     }
 
-    /** 玩家下线清理冷却记录 */
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onQuit(PlayerQuitEvent e) {
-        useCool.remove(e.getPlayer().getUniqueId());
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void onQuit(PlayerQuitEvent playerQuitEvent) {
+        this.useCool.remove(playerQuitEvent.getPlayer().getUniqueId());
     }
 }

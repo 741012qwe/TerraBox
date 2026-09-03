@@ -1,111 +1,66 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Material
+ *  org.bukkit.entity.Player
+ *  org.bukkit.inventory.Inventory
+ *  org.bukkit.inventory.InventoryHolder
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ */
 package com.terrabox;
 
+import com.terrabox.GuiListener;
+import com.terrabox.TerraBoxPlugin;
+import com.terrabox.TerrainType;
+import java.util.ArrayList;
+import java.util.List;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * 地形选择 GUI (对局世界地形模板):
- *  管理员选择下一局对局世界的地形 (默认平原 / 沙漠 / 大岛屿 / 末地岛屿 / 恶地 / 下界 / 城市),
- *  选择后由 ArenaManager 分配/创建对应世界, 并把玩家传送到该世界。
- *
- * 线程模型: open 由玩家所在区域线程调用, Inventory 构建为局部对象, 安全。
- */
 public class TerrainSelectGui {
-    public static final String TITLE = "§8[§6物资大陆§8] §b选择对局地形";
+    public static final String TITLE = "\u00a78[\u00a76\u7269\u8d44\u5927\u9646\u00a78] \u00a7b\u9009\u62e9\u5bf9\u5c40\u5730\u5f62";
     private final TerraBoxPlugin plugin;
 
-    public TerrainSelectGui(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public TerrainSelectGui(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    public void open(Player p) {
-        GuiListener.GuiHolder holder = new GuiListener.GuiHolder(GuiListener.Type.TERRAIN);
-        Inventory inv = Bukkit.createInventory(holder, 54, TITLE);
-        holder.inv = inv;
-
-        String current = plugin.arenas().current() != null ? plugin.arenas().current().getName() : "?";
-        TerrainType curType = plugin.arenas().current() != null
-                ? plugin.arenas().terrainOf(plugin.arenas().current().getName()) : TerrainType.DEFAULT;
-
-        // 顶部描述
-        inv.setItem(4, button(Material.COMPASS, "§b当前对局地形",
-                List.of("§7当前世界: §e" + current,
-                        "§7地形: " + curType.colorCode + curType.display,
-                        "§7尺寸: §f" + curType.worldSize() + "x" + curType.worldSize(), "",
-                        "§e点击下方切换地形")));
-
-        // 8 种地形: 第一行 (item 10..17)
-        inv.setItem(10, button(Material.GRASS_BLOCK, "§a默认平原地形",
-                List.of("§7中心平坦草原, 外围丘陵山地",
-                        "§7稀疏树木, 开阔对战",
-                        "§7尺寸: §f" + TerrainType.DEFAULT.worldSize() + "x" + TerrainType.DEFAULT.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(11, button(Material.SAND, "§6沙漠风格地形",
-                List.of("§7沙丘起伏, 砂岩底层",
-                        "§7稀疏仙人掌, 视野开阔",
-                        "§7尺寸: §f" + TerrainType.DESERT.worldSize() + "x" + TerrainType.DESERT.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(12, button(Material.OAK_BOAT, "§b大岛屿风格地形",
-                List.of("§7随机大小岛屿群, 中间海洋",
-                        "§7岛屿互不相连, 需游泳/划船",
-                        "§7尺寸: §f" + TerrainType.ISLANDS.worldSize() + "x" + TerrainType.ISLANDS.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(13, button(Material.END_STONE, "§d末地岛屿地形",
-                List.of("§7浮空末地石岛群, 黑色天空",
-                        "§7主岛+黑曜石柱+末地城塔楼",
-                        "§7群系: 末地高地/中地/贫瘠/小岛",
-                        "§7尺寸: §f" + TerrainType.THE_END.worldSize() + "x" + TerrainType.THE_END.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(14, button(Material.RED_SAND, "§c恶地地形",
-                List.of("§7红沙地表, 彩陶瓦层",
-                        "§7被侵蚀的平顶山丘, 裸露金矿",
-                        "§7群系: 恶地/侵蚀恶地/林地恶地",
-                        "§7尺寸: §f" + TerrainType.BADLANDS.worldSize() + "x" + TerrainType.BADLANDS.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(15, button(Material.NETHERRACK, "§4下界地形",
-                List.of("§7地狱岩起伏, 岩浆湖, 红色天空",
-                        "§7灵魂沙峡谷, 玄武岩柱",
-                        "§7群系: 下界荒原/灵魂沙峡谷/玄武岩三角洲/绯红/诡异森林",
-                        "§7尺寸: §f" + TerrainType.NETHER.worldSize() + "x" + TerrainType.NETHER.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(16, button(Material.STONE_BRICKS, "§3城市地形",
-                List.of("§7平坦街道网格, 建筑群",
-                        "§7混凝土高楼, 公园绿地",
-                        "§7群系: 平原",
-                        "§7尺寸: §f" + TerrainType.CITY.worldSize() + "x" + TerrainType.CITY.worldSize(), "",
-                        "§e点击选择")));
-        inv.setItem(17, button(Material.OAK_SAPLING, "§2正常主世界",
-                List.of("§7多样地形: 平原/丘陵/山地/河流",
-                        "§7有边境墙/围墙, 可进地狱/末地传送门",
-                        "§7箱子较少, 品质较低 (基础世界)",
-                        "§7尺寸: §f" + TerrainType.NORMAL.worldSize() + "x" + TerrainType.NORMAL.worldSize(), "",
-                        "§e点击选择")));
-
-        // 操作按钮
-        inv.setItem(22, button(Material.BARRIER, "§c取消",
-                List.of("§7关闭选择界面", "", "§e点击取消")));
-
-        inv.setItem(26, button(Material.EMERALD, "§a生成新对局世界",
-                List.of("§7按当前选定地形额外创建新世界", "§7需要管理员权限", "", "§e点击生成并加入")));
-
-        p.openInventory(inv);
+    public void open(Player player) {
+        Inventory inventory;
+        GuiListener.GuiHolder guiHolder = new GuiListener.GuiHolder(GuiListener.Type.TERRAIN);
+        guiHolder.inv = inventory = Bukkit.createInventory((InventoryHolder)guiHolder, (int)54, (String)TITLE);
+        String string = this.plugin.arenas().current() != null ? this.plugin.arenas().current().getName() : "?";
+        TerrainType terrainType = this.plugin.arenas().current() != null ? this.plugin.arenas().terrainOf(this.plugin.arenas().current().getName()) : TerrainType.DEFAULT;
+        inventory.setItem(4, this.button(Material.COMPASS, "\u00a7b\u5f53\u524d\u5bf9\u5c40\u5730\u5f62", List.of("\u00a77\u5f53\u524d\u4e16\u754c: \u00a7e" + string, "\u00a77\u5730\u5f62: " + terrainType.colorCode + terrainType.display, "\u00a77\u5c3a\u5bf8: \u00a7f" + terrainType.worldSize() + "x" + terrainType.worldSize(), "", "\u00a7e\u70b9\u51fb\u4e0b\u65b9\u5207\u6362\u5730\u5f62")));
+        inventory.setItem(10, this.button(Material.GRASS_BLOCK, "\u00a7a\u9ed8\u8ba4\u5e73\u539f\u5730\u5f62", List.of("\u00a77\u4e2d\u5fc3\u5e73\u5766\u8349\u539f, \u5916\u56f4\u4e18\u9675\u5c71\u5730", "\u00a77\u7a00\u758f\u6811\u6728, \u5f00\u9614\u5bf9\u6218", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.DEFAULT.worldSize() + "x" + TerrainType.DEFAULT.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(11, this.button(Material.SAND, "\u00a76\u6c99\u6f20\u98ce\u683c\u5730\u5f62", List.of("\u00a77\u6c99\u4e18\u8d77\u4f0f, \u7802\u5ca9\u5e95\u5c42", "\u00a77\u7a00\u758f\u4ed9\u4eba\u638c, \u89c6\u91ce\u5f00\u9614", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.DESERT.worldSize() + "x" + TerrainType.DESERT.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(12, this.button(Material.OAK_BOAT, "\u00a7b\u5927\u5c9b\u5c7f\u98ce\u683c\u5730\u5f62", List.of("\u00a77\u968f\u673a\u5927\u5c0f\u5c9b\u5c7f\u7fa4, \u4e2d\u95f4\u6d77\u6d0b", "\u00a77\u5c9b\u5c7f\u4e92\u4e0d\u76f8\u8fde, \u9700\u6e38\u6cf3/\u5212\u8239", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.ISLANDS.worldSize() + "x" + TerrainType.ISLANDS.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(13, this.button(Material.END_STONE, "\u00a7d\u672b\u5730\u5c9b\u5c7f\u5730\u5f62", List.of("\u00a77\u6d6e\u7a7a\u672b\u5730\u77f3\u5c9b\u7fa4, \u9ed1\u8272\u5929\u7a7a", "\u00a77\u4e3b\u5c9b+\u9ed1\u66dc\u77f3\u67f1+\u672b\u5730\u57ce\u5854\u697c", "\u00a77\u7fa4\u7cfb: \u672b\u5730\u9ad8\u5730/\u4e2d\u5730/\u8d2b\u7620/\u5c0f\u5c9b", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.THE_END.worldSize() + "x" + TerrainType.THE_END.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(14, this.button(Material.RED_SAND, "\u00a7c\u6076\u5730\u5730\u5f62", List.of("\u00a77\u7ea2\u6c99\u5730\u8868, \u5f69\u9676\u74e6\u5c42", "\u00a77\u88ab\u4fb5\u8680\u7684\u5e73\u9876\u5c71\u4e18, \u88f8\u9732\u91d1\u77ff", "\u00a77\u7fa4\u7cfb: \u6076\u5730/\u4fb5\u8680\u6076\u5730/\u6797\u5730\u6076\u5730", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.BADLANDS.worldSize() + "x" + TerrainType.BADLANDS.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(15, this.button(Material.NETHERRACK, "\u00a74\u4e0b\u754c\u5730\u5f62", List.of("\u00a77\u5730\u72f1\u5ca9\u8d77\u4f0f, \u5ca9\u6d46\u6e56, \u7ea2\u8272\u5929\u7a7a", "\u00a77\u7075\u9b42\u6c99\u5ce1\u8c37, \u7384\u6b66\u5ca9\u67f1", "\u00a77\u7fa4\u7cfb: \u4e0b\u754c\u8352\u539f/\u7075\u9b42\u6c99\u5ce1\u8c37/\u7384\u6b66\u5ca9\u4e09\u89d2\u6d32/\u7eef\u7ea2/\u8be1\u5f02\u68ee\u6797", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.NETHER.worldSize() + "x" + TerrainType.NETHER.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(16, this.button(Material.STONE_BRICKS, "\u00a73\u57ce\u5e02\u5730\u5f62", List.of("\u00a77\u5e73\u5766\u8857\u9053\u7f51\u683c, \u5efa\u7b51\u7fa4", "\u00a77\u6df7\u51dd\u571f\u9ad8\u697c, \u516c\u56ed\u7eff\u5730", "\u00a77\u7fa4\u7cfb: \u5e73\u539f", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.CITY.worldSize() + "x" + TerrainType.CITY.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(17, this.button(Material.OAK_SAPLING, "\u00a72\u6b63\u5e38\u4e3b\u4e16\u754c", List.of("\u00a77\u591a\u6837\u5730\u5f62: \u5e73\u539f/\u4e18\u9675/\u5c71\u5730/\u6cb3\u6d41", "\u00a77\u6709\u8fb9\u5883\u5899/\u56f4\u5899, \u53ef\u8fdb\u5730\u72f1/\u672b\u5730\u4f20\u9001\u95e8", "\u00a77\u7bb1\u5b50\u8f83\u5c11, \u54c1\u8d28\u8f83\u4f4e (\u57fa\u7840\u4e16\u754c)", "\u00a77\u5c3a\u5bf8: \u00a7f" + TerrainType.NORMAL.worldSize() + "x" + TerrainType.NORMAL.worldSize(), "", "\u00a7e\u70b9\u51fb\u9009\u62e9")));
+        inventory.setItem(22, this.button(Material.BARRIER, "\u00a7c\u53d6\u6d88", List.of("\u00a77\u5173\u95ed\u9009\u62e9\u754c\u9762", "", "\u00a7e\u70b9\u51fb\u53d6\u6d88")));
+        inventory.setItem(26, this.button(Material.EMERALD, "\u00a7a\u751f\u6210\u65b0\u5bf9\u5c40\u4e16\u754c", List.of("\u00a77\u6309\u5f53\u524d\u9009\u5b9a\u5730\u5f62\u989d\u5916\u521b\u5efa\u65b0\u4e16\u754c", "\u00a77\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650", "", "\u00a7e\u70b9\u51fb\u751f\u6210\u5e76\u52a0\u5165")));
+        player.openInventory(inventory);
     }
 
-    private ItemStack button(Material mat, String name, List<String> lore) {
-        ItemStack it = new ItemStack(mat);
-        ItemMeta meta = it.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(name);
-            meta.setLore(new ArrayList<>(lore));
-            it.setItemMeta(meta);
+    private ItemStack button(Material material, String string, List<String> list) {
+        ItemStack itemStack = new ItemStack(material);
+        ItemMeta itemMeta = itemStack.getItemMeta();
+        if (itemMeta != null) {
+            itemMeta.setDisplayName(string);
+            itemMeta.setLore(new ArrayList<String>(list));
+            itemStack.setItemMeta(itemMeta);
         }
-        return it;
+        return itemStack;
     }
 }

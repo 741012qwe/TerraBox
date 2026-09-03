@@ -1,370 +1,376 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import com.terrabox.TerrainType;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.function.Consumer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.plugin.Plugin;
 
-import java.util.ArrayDeque;
-import java.util.function.Consumer;
-
-/**
- * 世界地形装饰 (资源大陆风格):
- *  - 边界屏障墙: 四边 3 格高石砖墙 + 红混凝土警戒带 + 火把 (防止跑出地图)
- *  - 中心战场: 半径内清理植被, 开阔对战区
- *  - 四条主干道: 中心广场向四边界铺石板路 (水面垫高)
- *  - 四座瞭望塔: N/E/S/W 距中心 tower-distance, 塔顶灯笼 + 史诗物资箱
- *
- * 线程模型: 全局线程驱动区块任务队列 (每 tick 提交一批), 每个区块任务 force load 后
- *  在 RegionScheduler 区域线程执行方块操作, 完成后解除 force load。
- */
 public class WorldDecorator {
     private final TerraBoxPlugin plugin;
     private volatile boolean done = false;
-    private final ArrayDeque<Job> queue = new ArrayDeque<>();
+    private final ArrayDeque<Job> queue = new ArrayDeque();
     private ScheduledTask driver;
 
-    /** 区块级任务: 在指定区块的区域线程执行 body */
-    private record Job(int cx, int cz, Consumer<ScheduledTask> body) {}
-
-    public WorldDecorator(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public WorldDecorator(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
     public boolean isDone() {
-        return done;
+        return this.done;
     }
 
-    /** 异步构建全部装饰 (任意线程, 不阻塞) */
     public void build() {
-        World w = plugin.worlds().world();
-        if (w == null) return;
-        if (!plugin.getConfig().getBoolean("decorator.enabled", true)) return;
-        queue.clear();
-        enqueueJobs(w);
-        if (queue.isEmpty()) { done = true; return; }
-        plugin.getLogger().info("开始地形装饰: " + queue.size() + " 个区块任务");
-        final int batch = Math.max(2, plugin.getConfig().getInt("decorator.batch-per-tick", 6));
-        driver = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> {
-            if (queue.isEmpty()) {
-                t.cancel();
-                driver = null;
-                done = true;
-                plugin.getLogger().info("地形装饰完成: 边界墙/主干道/瞭望塔/中心战场已就绪");
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            return;
+        }
+        if (!this.plugin.getConfig().getBoolean("decorator.enabled", true)) {
+            return;
+        }
+        this.queue.clear();
+        this.enqueueJobs(world);
+        if (this.queue.isEmpty()) {
+            this.done = true;
+            return;
+        }
+        this.plugin.getLogger().info("\u5f00\u59cb\u5730\u5f62\u88c5\u9970: " + this.queue.size() + " \u4e2a\u533a\u5757\u4efb\u52a1");
+        int n = Math.max(2, this.plugin.getConfig().getInt("decorator.batch-per-tick", 6));
+        this.driver = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> {
+            Job job;
+            if (this.queue.isEmpty()) {
+                scheduledTask.cancel();
+                this.driver = null;
+                this.done = true;
+                this.plugin.getLogger().info("\u5730\u5f62\u88c5\u9970\u5b8c\u6210: \u8fb9\u754c\u5899/\u4e3b\u5e72\u9053/\u77ad\u671b\u5854/\u4e2d\u5fc3\u6218\u573a\u5df2\u5c31\u7eea");
                 return;
             }
-            for (int i = 0; i < batch && !queue.isEmpty(); i++) {
-                Job j = queue.poll();
-                if (j == null) break;
-                submitJob(w, j);
+            for (int i = 0; i < n && !this.queue.isEmpty() && (job = this.queue.poll()) != null; ++i) {
+                this.submitJob(world, job);
             }
         }, 20L, 10L);
     }
 
-    private void submitJob(World w, Job j) {
-        w.getChunkAtAsync(j.cx, j.cz).whenComplete((chunk, err) -> {
-            if (err != null) {
-                plugin.getLogger().warning("装饰区块加载失败 (" + j.cx + "," + j.cz + "): " + err);
+    private void submitJob(World world, Job job) {
+        world.getChunkAtAsync(job.cx, job.cz).whenComplete((chunk, throwable) -> {
+            if (throwable != null) {
+                this.plugin.getLogger().warning("\u88c5\u9970\u533a\u5757\u52a0\u8f7d\u5931\u8d25 (" + job.cx + "," + job.cz + "): " + String.valueOf(throwable));
                 return;
             }
-            Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                try { w.setChunkForceLoaded(j.cx, j.cz, true); } catch (Throwable ignored) {}
-                Bukkit.getRegionScheduler().run(plugin, w, j.cx, j.cz, task -> {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                try {
+                    world.setChunkForceLoaded(job.cx, job.cz, true);
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, job.cx, job.cz, scheduledTask -> {
                     try {
-                        j.body().accept(task);
-                    } catch (Throwable ex) {
-                        plugin.getLogger().warning("装饰任务异常 (" + j.cx + "," + j.cz + "): " + ex);
-                    } finally {
-                        try { w.setChunkForceLoaded(j.cx, j.cz, false); } catch (Throwable ignored) {}
+                        job.body().accept((ScheduledTask)scheduledTask);
+                    }
+                    catch (Throwable throwable) {
+                        this.plugin.getLogger().warning("\u88c5\u9970\u4efb\u52a1\u5f02\u5e38 (" + job.cx + "," + job.cz + "): " + String.valueOf(throwable));
+                    }
+                    finally {
+                        try {
+                            world.setChunkForceLoaded(job.cx, job.cz, false);
+                        }
+                        catch (Throwable throwable) {}
                     }
                 });
             });
         });
     }
 
-    // ==================== 任务规划 ====================
+    private void enqueueJobs(World world) {
+        int[][] nArrayArray;
+        int n;
+        int n2;
+        int n3;
+        int n4;
+        int n5;
+        int n6;
+        int n7;
+        int n8;
+        int n9 = (int)this.plugin.worlds().borderHalf();
+        int n10 = n9 - 2;
+        int n11 = this.plugin.getConfig().getInt("decorator.clear-center-radius", 30);
+        int n12 = Math.min(n10 - 40, Math.max(80, this.plugin.getConfig().getInt("decorator.tower-distance", 320)));
+        TerrainType terrainType = this.plugin.arenas() != null ? this.plugin.arenas().terrainOf(world.getName()) : TerrainType.DEFAULT;
+        boolean bl = terrainType == TerrainType.THE_END || terrainType == TerrainType.NETHER;
+        HashSet<Long> hashSet = new HashSet<Long>();
+        if (!bl) {
+            n8 = (int)Math.floor((double)(-n11) / 16.0);
+            n7 = (int)Math.ceil((double)n11 / 16.0);
+            for (n6 = n8; n6 < n7; ++n6) {
+                for (n5 = n8; n5 < n7; ++n5) {
+                    if (!hashSet.add(WorldDecorator.pack(n6, n5))) continue;
+                    n4 = n6;
+                    n3 = n5;
+                    this.queue.add(new Job(n6, n5, scheduledTask -> this.clearCenter(world, n4, n3, n11)));
+                }
+            }
+        }
+        n8 = Math.max(10, this.plugin.getConfig().getInt("game.spawn-area-radius", 7) + 2);
+        if (!bl) {
+            for (n7 = (int)Math.floor((double)(-n10) / 16.0); n7 < (int)Math.ceil((double)n10 / 16.0); ++n7) {
+                for (n6 = -1; n6 <= 0; ++n6) {
+                    if (!hashSet.add(WorldDecorator.pack(n7, n6))) continue;
+                    n5 = n7;
+                    n4 = n6;
+                    this.queue.add(new Job(n7, n6, scheduledTask -> this.buildRoad(world, n5, n4, n8, n10)));
+                }
+            }
+            for (n7 = (int)Math.floor((double)(-n10) / 16.0); n7 < (int)Math.ceil((double)n10 / 16.0); ++n7) {
+                for (n6 = -1; n6 <= 0; ++n6) {
+                    if (!hashSet.add(WorldDecorator.pack(n6, n7))) continue;
+                    n5 = n6;
+                    n4 = n7;
+                    this.queue.add(new Job(n6, n7, scheduledTask -> this.buildRoadZ(world, n5, n4, n8, n10)));
+                }
+            }
+        }
+        n7 = (int)Math.floor((double)(-n10) / 16.0);
+        n6 = (int)Math.ceil((double)n10 / 16.0);
+        for (n5 = 0; n5 < 4; ++n5) {
+            for (n4 = n7; n4 < n6; ++n4) {
+                int n13;
+                if (n5 == 0) {
+                    n3 = n4;
+                    n13 = n10 >> 4;
+                } else if (n5 == 1) {
+                    n3 = n4;
+                    n13 = -n10 >> 4;
+                } else if (n5 == 2) {
+                    n3 = n10 >> 4;
+                    n13 = n4;
+                } else {
+                    n3 = -n10 >> 4;
+                    n13 = n4;
+                }
+                int n14 = n3;
+                n2 = n13;
+                n = n5;
+                this.queue.add(new Job(n3, n13, scheduledTask -> this.buildWall(world, n14, n2, n10, n)));
+            }
+        }
+        for (int[] nArray : nArrayArray = new int[][]{{0, n12}, {0, -n12}, {n12, 0}, {-n12, 0}}) {
+            n2 = nArray[0] >> 4;
+            n = nArray[1] >> 4;
+            if (!hashSet.add(WorldDecorator.pack(n2, n))) continue;
+            int n15 = nArray[0];
+            int n16 = nArray[1];
+            this.queue.add(new Job(n2, n, scheduledTask -> this.buildTower(world, n15, n16)));
+        }
+    }
 
-    private void enqueueJobs(World w) {
-        int half = (int) plugin.worlds().borderHalf(); // 392
-        int wall = half - 2;    // 墙在边界内 2 格
-        int clearR = plugin.getConfig().getInt("decorator.clear-center-radius", 30);
-        int towerDist = Math.min(wall - 40, Math.max(80, plugin.getConfig().getInt("decorator.tower-distance", 320)));
+    private static long pack(int n, int n2) {
+        return (long)n << 32 | (long)n2 & 0xFFFFFFFFL;
+    }
 
-        // 当前地形: 末地是浮空岛、下界是岩浆地形, 没有草地/地面, 跳过主干道/中心清理 (避免破坏特殊地貌)
-        TerrainType cur = plugin.arenas() != null
-                ? plugin.arenas().terrainOf(w.getName()) : TerrainType.DEFAULT;
-        boolean isEnd = (cur == TerrainType.THE_END || cur == TerrainType.NETHER);
+    private void clearCenter(World world, int n, int n2, int n3) {
+        int n4 = n3 * n3;
+        for (int i = 0; i < 16; ++i) {
+            for (int j = 0; j < 16; ++j) {
+                int n5 = n * 16 + i;
+                int n6 = n2 * 16 + j;
+                if (n5 * n5 + n6 * n6 > n4) continue;
+                this.clearVegetationAt(world, n5, n6);
+            }
+        }
+    }
 
-        java.util.Set<Long> seen = new java.util.HashSet<>();
+    private void clearVegetationAt(World world, int n, int n2) {
+        Material material;
+        int n3 = world.getHighestBlockYAt(n, n2);
+        if (n3 <= 0) {
+            return;
+        }
+        Material material2 = world.getBlockAt(n, n3, n2).getType();
+        if (material2.isAir() || material2 == Material.WATER || material2 == Material.LAVA) {
+            return;
+        }
+        for (int i = n3; i > 0 && (material = world.getBlockAt(n, i, n2).getType()) != Material.GRASS_BLOCK && material != Material.DIRT && material != Material.STONE && material != Material.SAND && material != Material.GRAVEL && material != Material.SANDSTONE && material != Material.DEEPSLATE && material != Material.STONE_BRICKS && material != Material.SMOOTH_STONE && material != Material.MUD; --i) {
+            world.getBlockAt(n, i, n2).setType(Material.AIR, false);
+        }
+    }
 
-        // 1) 中心战场清理: 覆盖半径 clearR 的区块 (末地跳过, 主岛保持末地石原貌)
-        if (!isEnd) {
-            int c0 = (int) Math.floor(-clearR / 16.0), c1 = (int) Math.ceil(clearR / 16.0);
-            for (int cx = c0; cx < c1; cx++) {
-                for (int cz = c0; cz < c1; cz++) {
-                    if (seen.add(pack(cx, cz))) {
-                        final int fcx = cx, fcz = cz;
-                        queue.add(new Job(cx, cz, task -> clearCenter(w, fcx, fcz, clearR)));
+    private void buildRoad(World world, int n, int n2, int n3, int n4) {
+        for (int i = 0; i < 16; ++i) {
+            int n5 = n * 16 + i;
+            if (Math.abs(n5) < n3 || Math.abs(n5) > n4) continue;
+            for (int j = -1; j <= 1; ++j) {
+                int n6 = n2 * 16 + j;
+                if (n6 < -1 || n6 > 1) continue;
+                this.pave(world, n5, n6, Material.SMOOTH_STONE);
+            }
+        }
+    }
+
+    private void buildRoadZ(World world, int n, int n2, int n3, int n4) {
+        for (int i = 0; i < 16; ++i) {
+            int n5 = n2 * 16 + i;
+            if (Math.abs(n5) < n3 || Math.abs(n5) > n4) continue;
+            for (int j = -1; j <= 1; ++j) {
+                int n6 = n * 16 + j;
+                if (n6 < -1 || n6 > 1) continue;
+                this.pave(world, n6, n5, Material.SMOOTH_STONE);
+            }
+        }
+    }
+
+    private void pave(World world, int n, int n2, Material material) {
+        int n3 = world.getHighestBlockYAt(n, n2);
+        Material material2 = world.getBlockAt(n, n3, n2).getType();
+        int n4 = n3;
+        if (material2 == Material.WATER || material2 == Material.SEAGRASS || material2 == Material.KELP_PLANT || material2 == Material.KELP || material2 == Material.LILY_PAD) {
+            for (int i = n3; i >= 62; --i) {
+                Material material3 = world.getBlockAt(n, i, n2).getType();
+                if (!material3.isAir() && material3 != Material.WATER && material3 != Material.SEAGRASS && material3 != Material.KELP_PLANT && material3 != Material.KELP) continue;
+                world.getBlockAt(n, i, n2).setType(Material.STONE, false);
+            }
+            n4 = Math.max(n3, 62);
+        }
+        world.getBlockAt(n, n4 + 1, n2).setType(material, false);
+        Block block = world.getBlockAt(n, n4 + 2, n2);
+        if (block.getType() != Material.AIR && !block.getType().name().contains("TORCH") && !block.getType().name().contains("LANTERN")) {
+            block.setType(Material.AIR, false);
+        }
+    }
+
+    private void buildWall(World world, int n, int n2, int n3, int n4) {
+        int n5 = Math.max(2, this.plugin.getConfig().getInt("decorator.wall-height", 3));
+        for (int i = 0; i < 16; ++i) {
+            for (int j = 0; j < 16; ++j) {
+                int n6;
+                int n7;
+                Material material;
+                int n8;
+                boolean bl;
+                int n9 = n * 16 + i;
+                int n10 = n2 * 16 + j;
+                if (n4 == 0) {
+                    bl = n10 == n3;
+                } else if (n4 == 1) {
+                    bl = n10 == -n3;
+                } else if (n4 == 2) {
+                    bl = n9 == n3;
+                } else {
+                    boolean bl2 = bl = n9 == -n3;
+                }
+                if (!bl || Math.abs(n9) > n3 || Math.abs(n10) > n3) continue;
+                int n11 = world.getHighestBlockYAt(n9, n10);
+                Material material2 = world.getBlockAt(n9, n11, n10).getType();
+                int n12 = n11;
+                if (material2 == Material.WATER || material2 == Material.SEAGRASS || material2 == Material.KELP || material2 == Material.KELP_PLANT) {
+                    for (n8 = n11; n8 >= 62; --n8) {
+                        material = world.getBlockAt(n9, n8, n10).getType();
+                        if (!material.isAir() && material != Material.WATER && material != Material.SEAGRASS && material != Material.KELP && material != Material.KELP_PLANT) continue;
+                        world.getBlockAt(n9, n8, n10).setType(Material.STONE, false);
                     }
+                    n12 = Math.max(n11, 62);
                 }
-            }
-        }
-
-        // 2) 四条主干道: x 轴(z∈[-1,1], x∈[-wall,wall]) 与 z 轴 (末地跳过)
-        int roadMin = Math.max(10, plugin.getConfig().getInt("game.spawn-area-radius", 7) + 2);
-        if (!isEnd) {
-        for (int cx = (int) Math.floor(-wall / 16.0); cx < (int) Math.ceil(wall / 16.0); cx++) {
-            for (int cz = -1; cz <= 0; cz++) { // z=-1,0 区块覆盖 z∈[-1,1] 道路
-                if (seen.add(pack(cx, cz))) {
-                    final int fcx = cx, fcz = cz;
-                    queue.add(new Job(cx, cz, task -> buildRoad(w, fcx, fcz, roadMin, wall)));
+                for (n8 = 1; n8 <= 4; ++n8) {
+                    material = world.getBlockAt(n9, n12 - n8, n10);
+                    if (!material.getType().isAir() && material.getType().isSolid()) continue;
+                    material.setType(Material.STONE, false);
                 }
-            }
-        }
-        for (int cz = (int) Math.floor(-wall / 16.0); cz < (int) Math.ceil(wall / 16.0); cz++) {
-            for (int cx = -1; cx <= 0; cx++) {
-                if (seen.add(pack(cx, cz))) {
-                    final int fcx = cx, fcz = cz;
-                    queue.add(new Job(cx, cz, task -> buildRoadZ(w, fcx, fcz, roadMin, wall)));
+                n8 = this.plugin.getConfig().getInt("decorator.wall-extra-height", 6);
+                int n13 = n5 + Math.max(0, n8);
+                for (n7 = 1; n7 <= n13; ++n7) {
+                    world.getBlockAt(n9, n12 + n7, n10).setType(Material.STONE_BRICKS, false);
                 }
-            }
-        }
-        }
-
-        // 3) 边界屏障墙: 四边 (不去重: 角落区块需处理两条墙线)
-        int wallMin = (int) Math.floor(-wall / 16.0), wallMax = (int) Math.ceil(wall / 16.0);
-        for (int side = 0; side < 4; side++) {
-            for (int c = wallMin; c < wallMax; c++) {
-                int cx, cz;
-                if (side == 0) { cx = c; cz = wall >> 4; }          // 北 z=+wall
-                else if (side == 1) { cx = c; cz = -wall >> 4; }    // 南
-                else if (side == 2) { cx = wall >> 4; cz = c; }     // 东
-                else { cx = -wall >> 4; cz = c; }                   // 西
-                final int fcx = cx, fcz = cz, fs = side;
-                queue.add(new Job(cx, cz, task -> buildWall(w, fcx, fcz, wall, fs)));
-            }
-        }
-
-        // 4) 瞭望塔: (0,±towerDist) 与 (±towerDist,0)
-        int[][] towers = {{0, towerDist}, {0, -towerDist}, {towerDist, 0}, {-towerDist, 0}};
-        for (int[] tp : towers) {
-            int cx = tp[0] >> 4, cz = tp[1] >> 4;
-            if (seen.add(pack(cx, cz))) {
-                final int tx = tp[0], tz = tp[1];
-                queue.add(new Job(cx, cz, task -> buildTower(w, tx, tz)));
+                if ((n9 + n10) % 16 == 0) {
+                    world.getBlockAt(n9, n12 + n13 + 1, n10).setType(Material.TORCH, false);
+                }
+                n7 = n9;
+                int n14 = n10;
+                if (n4 == 0) {
+                    n14 = n10 - 2;
+                } else if (n4 == 1) {
+                    n14 = n10 + 2;
+                } else {
+                    n7 = n4 == 2 ? n9 - 2 : n9 + 2;
+                }
+                if (Math.abs(n7) > n3 || Math.abs(n14) > n3 || (n6 = world.getHighestBlockYAt(n7, n14)) <= 0) continue;
+                world.getBlockAt(n7, n6 + 1, n14).setType(Material.RED_CONCRETE, false);
             }
         }
     }
 
-    private static long pack(int cx, int cz) {
-        return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+    private void buildTower(World world, int n, int n2) {
+        boolean bl;
+        int n3;
+        int n4;
+        int n5;
+        int n6 = world.getHighestBlockYAt(n, n2);
+        for (n5 = -3; n5 <= 3; ++n5) {
+            for (n4 = -3; n4 <= 3; ++n4) {
+                n3 = world.getHighestBlockYAt(n + n5, n2 + n4);
+                bl = Math.abs(n5) <= 2 && Math.abs(n4) <= 2;
+                int n7 = bl ? n6 + 1 : n6 + 1;
+                for (int i = n3 + 1; i <= n7; ++i) {
+                    Material material = i == n7 ? Material.SMOOTH_STONE : Material.STONE_BRICKS;
+                    world.getBlockAt(n + n5, i, n2 + n4).setType(material, false);
+                }
+                if (bl) continue;
+                world.getBlockAt(n + n5, n6 + 1, n2 + n4).setType(Material.STONE_BRICKS, false);
+            }
+        }
+        for (n5 = n6 + 2; n5 <= n6 + 9; ++n5) {
+            for (n4 = -2; n4 <= 2; ++n4) {
+                for (n3 = -2; n3 <= 2; ++n3) {
+                    boolean bl2 = bl = Math.abs(n4) == 2 || Math.abs(n3) == 2;
+                    if (!bl) continue;
+                    world.getBlockAt(n + n4, n5, n2 + n3).setType(Material.STONE_BRICKS, false);
+                }
+            }
+            if (n5 % 2 != 0) continue;
+            world.getBlockAt(n - 2, n5, n2 - 2).setType(Material.SMOOTH_STONE, false);
+            world.getBlockAt(n + 2, n5, n2 - 2).setType(Material.SMOOTH_STONE, false);
+            world.getBlockAt(n - 2, n5, n2 + 2).setType(Material.SMOOTH_STONE, false);
+            world.getBlockAt(n + 2, n5, n2 + 2).setType(Material.SMOOTH_STONE, false);
+        }
+        for (n5 = -2; n5 <= 2; ++n5) {
+            for (n4 = -2; n4 <= 2; ++n4) {
+                world.getBlockAt(n + n5, n6 + 10, n2 + n4).setType(Material.SMOOTH_STONE, false);
+            }
+        }
+        for (n5 = -2; n5 <= 2; ++n5) {
+            for (n4 = -2; n4 <= 2; ++n4) {
+                int n8 = n3 = Math.abs(n5) == 2 || Math.abs(n4) == 2 ? 1 : 0;
+                if (n3 == 0) continue;
+                world.getBlockAt(n + n5, n6 + 11, n2 + n4).setType(Material.IRON_BARS, false);
+            }
+        }
+        world.getBlockAt(n, n6 + 12, n2).setType(Material.LANTERN, false);
+        String string = this.plugin.getConfig().getString("decorator.tower-rarity", "EPIC");
+        Rarity rarity = Rarity.parse(string);
+        if (rarity == null) {
+            rarity = Rarity.EPIC;
+        }
+        this.plugin.boxes().spawnBoxAt(n + 1, n2 + 1, rarity, false, null);
+        this.plugin.getLogger().info("\u77ad\u671b\u5854\u5df2\u5efa\u6210: (" + n + "," + n2 + ") \u5854\u9876 " + rarity.display + "\u7269\u8d44\u7bb1");
     }
 
-    // ==================== 中心战场 ====================
-
-    private void clearCenter(World w, int cx, int cz, int radius) {
-        int r2 = radius * radius;
-        for (int bx = 0; bx < 16; bx++) {
-            for (int bz = 0; bz < 16; bz++) {
-                int x = cx * 16 + bx, z = cz * 16 + bz;
-                if (x * x + z * z > r2) continue;
-                clearVegetationAt(w, x, z);
-            }
-        }
-    }
-
-    /** 清除一列的树/草/花, 保留地面 */
-    private void clearVegetationAt(World w, int x, int z) {
-        int y = w.getHighestBlockYAt(x, z);
-        if (y <= 0) return;
-        Material top = w.getBlockAt(x, y, z).getType();
-        if (top.isAir() || top == Material.WATER || top == Material.LAVA) return;
-        for (int yy = y; yy > 0; yy--) {
-            Material m = w.getBlockAt(x, yy, z).getType();
-            if (m == Material.GRASS_BLOCK || m == Material.DIRT || m == Material.STONE
-                    || m == Material.SAND || m == Material.GRAVEL || m == Material.SANDSTONE
-                    || m == Material.DEEPSLATE || m == Material.STONE_BRICKS
-                    || m == Material.SMOOTH_STONE || m == Material.MUD) break;
-            w.getBlockAt(x, yy, z).setType(Material.AIR, false);
-        }
-    }
-
-    // ==================== 主干道 ====================
-
-    private void buildRoad(World w, int cx, int cz, int roadMin, int wall) {
-        for (int bx = 0; bx < 16; bx++) {
-            int x = cx * 16 + bx;
-            if (Math.abs(x) < roadMin || Math.abs(x) > wall) continue;
-            for (int dz = -1; dz <= 1; dz++) {
-                int z = cz * 16 + dz;
-                if (z < -1 || z > 1) continue;
-                pave(w, x, z, Material.SMOOTH_STONE);
-            }
-        }
-    }
-
-    private void buildRoadZ(World w, int cx, int cz, int roadMin, int wall) {
-        for (int bz = 0; bz < 16; bz++) {
-            int z = cz * 16 + bz;
-            if (Math.abs(z) < roadMin || Math.abs(z) > wall) continue;
-            for (int dx = -1; dx <= 1; dx++) {
-                int x = cx * 16 + dx;
-                if (x < -1 || x > 1) continue;
-                pave(w, x, z, Material.SMOOTH_STONE);
-            }
-        }
-    }
-
-    /** 铺路: 水面垫石头到海平面, 再铺表面方块 */
-    private void pave(World w, int x, int z, Material surface) {
-        int y = w.getHighestBlockYAt(x, z);
-        Material m = w.getBlockAt(x, y, z).getType();
-        int targetY = y;
-        if (m == Material.WATER || m == Material.SEAGRASS || m == Material.KELP_PLANT
-                || m == Material.KELP || m == Material.LILY_PAD) {
-            for (int yy = y; yy >= 62; yy--) {
-                Material mm = w.getBlockAt(x, yy, z).getType();
-                if (mm.isAir() || mm == Material.WATER || mm == Material.SEAGRASS
-                        || mm == Material.KELP_PLANT || mm == Material.KELP) {
-                    w.getBlockAt(x, yy, z).setType(Material.STONE, false);
-                }
-            }
-            targetY = Math.max(y, 62);
-        }
-        w.getBlockAt(x, targetY + 1, z).setType(surface, false);
-        // 路两侧保留, 路面上方 1 格清理 (防树挡路)
-        Block above = w.getBlockAt(x, targetY + 2, z);
-        if (above.getType() != Material.AIR && !above.getType().name().contains("TORCH")
-                && !above.getType().name().contains("LANTERN")) {
-            above.setType(Material.AIR, false);
-        }
-    }
-
-    // ==================== 边界屏障墙 ====================
-
-    private void buildWall(World w, int cx, int cz, int wall, int side) {
-        int h = Math.max(2, plugin.getConfig().getInt("decorator.wall-height", 3));
-        for (int bx = 0; bx < 16; bx++) {
-            for (int bz = 0; bz < 16; bz++) {
-                int x = cx * 16 + bx, z = cz * 16 + bz;
-                boolean onLine;
-                if (side == 0) onLine = (z == wall);
-                else if (side == 1) onLine = (z == -wall);
-                else if (side == 2) onLine = (x == wall);
-                else onLine = (x == -wall);
-                if (!onLine) continue;
-                if (Math.abs(x) > wall || Math.abs(z) > wall) continue;
-                // 墙: 从地表向下夯实一段(防穿透), 再向上建墙到高出土表
-                int y = w.getHighestBlockYAt(x, z);
-                Material m = w.getBlockAt(x, y, z).getType();
-                int ground = y;
-                if (m == Material.WATER || m == Material.SEAGRASS || m == Material.KELP
-                        || m == Material.KELP_PLANT) {
-                    for (int yy = y; yy >= 62; yy--) {
-                        Material mm = w.getBlockAt(x, yy, z).getType();
-                        if (mm.isAir() || mm == Material.WATER || mm == Material.SEAGRASS
-                                || mm == Material.KELP || mm == Material.KELP_PLANT) {
-                            w.getBlockAt(x, yy, z).setType(Material.STONE, false);
-                        }
-                    }
-                    ground = Math.max(y, 62);
-                }
-                // 向下夯实 4 格, 堵住土表以下穿透路径 (region 加载边界, 防绕过)
-                for (int d = 1; d <= 4; d++) {
-                    Block below = w.getBlockAt(x, ground - d, z);
-                    if (below.getType().isAir() || !below.getType().isSolid()) {
-                        below.setType(Material.STONE, false);
-                    }
-                }
-                // 墙向上: 相对土表 h 格 (h=3 固定) 再额外按外围地形抬升补偿, 保证墙顶高于周边最高可跳高度
-                int extra = plugin.getConfig().getInt("decorator.wall-extra-height", 6);
-                int total = h + Math.max(0, extra);
-                for (int i = 1; i <= total; i++) {
-                    w.getBlockAt(x, ground + i, z).setType(Material.STONE_BRICKS, false);
-                }
-                // 顶部火把 (每 16 格) — 放在墙顶
-                if (((x + z) % 16) == 0) {
-                    w.getBlockAt(x, ground + total + 1, z).setType(Material.TORCH, false);
-                }
-                // 警戒带: 墙内侧 2 格, 放在地表上
-                int inX = x, inZ = z;
-                if (side == 0) inZ = z - 2;
-                else if (side == 1) inZ = z + 2;
-                else if (side == 2) inX = x - 2;
-                else inX = x + 2;
-                if (Math.abs(inX) <= wall && Math.abs(inZ) <= wall) {
-                    int iy = w.getHighestBlockYAt(inX, inZ);
-                    if (iy > 0) {
-                        w.getBlockAt(inX, iy + 1, inZ).setType(Material.RED_CONCRETE, false);
-                    }
-                }
-            }
-        }
-    }
-
-    // ==================== 瞭望塔 ====================
-
-    private void buildTower(World w, int tx, int tz) {
-        int y0 = w.getHighestBlockYAt(tx, tz);
-        // 塔顶箱子会由 BoxManager 异步放置 (放在塔顶平台上方)
-        // 底座: 外圈 7x7 垫平, 内部夯实整块(防掉入空洞)
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                int y = w.getHighestBlockYAt(tx + dx, tz + dz);
-                // 内部(塔身5x5覆盖区)夯实到地板: 从土表向上一直填到 y0+1, 形成实心平台
-                boolean inner = Math.abs(dx) <= 2 && Math.abs(dz) <= 2;
-                int fillTop = inner ? (y0 + 1) : (y0 + 1);
-                for (int yy = y + 1; yy <= fillTop; yy++) {
-                    Material f = (yy == fillTop) ? Material.SMOOTH_STONE : Material.STONE_BRICKS;
-                    w.getBlockAt(tx + dx, yy, tz + dz).setType(f, false);
-                }
-                // 底座外圈垫平只用石头
-                if (!inner) {
-                    w.getBlockAt(tx + dx, y0 + 1, tz + dz).setType(Material.STONE_BRICKS, false);
-                }
-            }
-        }
-        // 塔身 5x5 外墙 (y0+2 .. y0+9)
-        for (int yy = y0 + 2; yy <= y0 + 9; yy++) {
-            for (int dx = -2; dx <= 2; dx++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    boolean edge = Math.abs(dx) == 2 || Math.abs(dz) == 2;
-                    if (edge) {
-                        w.getBlockAt(tx + dx, yy, tz + dz).setType(Material.STONE_BRICKS, false);
-                    }
-                }
-            }
-            // 每层四角窗台装饰: 隔层放火把在四角
-            if (yy % 2 == 0) {
-                w.getBlockAt(tx - 2, yy, tz - 2).setType(Material.SMOOTH_STONE, false);
-                w.getBlockAt(tx + 2, yy, tz - 2).setType(Material.SMOOTH_STONE, false);
-                w.getBlockAt(tx - 2, yy, tz + 2).setType(Material.SMOOTH_STONE, false);
-                w.getBlockAt(tx + 2, yy, tz + 2).setType(Material.SMOOTH_STONE, false);
-            }
-        }
-        // 顶部平台 5x5 (y0+10) + 围栏防掉落 + 中心灯笼 + 塔顶箱
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                w.getBlockAt(tx + dx, y0 + 10, tz + dz).setType(Material.SMOOTH_STONE, false);
-            }
-        }
-        // 平台四周围栏 (留一个可进入的缺口天然即可, 箱在角上)
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                boolean edge = Math.abs(dx) == 2 || Math.abs(dz) == 2;
-                if (edge) {
-                    // 围栏用铁栏杆, 视线通透同时防跌落
-                    w.getBlockAt(tx + dx, y0 + 11, tz + dz).setType(Material.IRON_BARS, false);
-                }
-            }
-        }
-        w.getBlockAt(tx, y0 + 12, tz).setType(Material.LANTERN, false);
-        // 塔顶史诗物资箱 (放平台角落)
-        String rName = plugin.getConfig().getString("decorator.tower-rarity", "EPIC");
-        Rarity r = Rarity.parse(rName);
-        if (r == null) r = Rarity.EPIC;
-        plugin.boxes().spawnBoxAt(tx + 1, tz + 1, r, false, null);
-        plugin.getLogger().info("瞭望塔已建成: (" + tx + "," + tz + ") 塔顶 " + r.display + "物资箱");
+    private record Job(int cx, int cz, Consumer<ScheduledTask> body) {
     }
 }

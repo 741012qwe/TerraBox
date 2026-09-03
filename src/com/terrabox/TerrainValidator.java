@@ -1,114 +1,111 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Chunk
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.bukkit.Chunk;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * 地形验证器: 检查地形完整性和安全性
- *
- * Folia 线程模型: 所有世界方块访问必须走 getChunkAtAsync → RegionScheduler。
- * 本类不再在 Global/主线程同步读区块 (会导致 "Async chunk retrieval" 异常),
- * 改为对边界区块做异步轻量校验 (只抽查表面方块, 不遍历全高)。
- */
 public class TerrainValidator {
     private final TerraBoxPlugin plugin;
 
-    public TerrainValidator(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public TerrainValidator(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    /** 验证整个世界地形 (异步, 不阻塞调用线程) */
     public void validateWorld() {
-        World world = plugin.worlds().world();
+        World world = this.plugin.worlds().world();
         if (world == null) {
-            plugin.getLogger().warning("无法验证地形: 世界未加载");
+            this.plugin.getLogger().warning("\u65e0\u6cd5\u9a8c\u8bc1\u5730\u5f62: \u4e16\u754c\u672a\u52a0\u8f7d");
             return;
         }
-        plugin.getLogger().info("开始地形验证 (异步)...");
-        final int[] sampled = {0};
-        final java.util.concurrent.atomic.AtomicInteger checked = new java.util.concurrent.atomic.AtomicInteger(0);
-        final java.util.concurrent.atomic.AtomicInteger pending = new java.util.concurrent.atomic.AtomicInteger(0);
-
-        // 只取边界一圈的代表性区块做抽查 (避免遍历全部 65x65 区块全高)
-        double borderHalf = plugin.worlds().borderHalf();
-        int chunkSize = 16;
-        int minCx = (int) Math.floor(-borderHalf / chunkSize);
-        int maxCx = (int) Math.ceil(borderHalf / chunkSize);
-        List<int[]> borderChunks = new ArrayList<>();
-        for (int x = minCx; x <= maxCx; x++) {
-            borderChunks.add(new int[]{x, minCx});
-            borderChunks.add(new int[]{x, maxCx});
-            borderChunks.add(new int[]{minCx, x});
-            borderChunks.add(new int[]{maxCx, x});
+        this.plugin.getLogger().info("\u5f00\u59cb\u5730\u5f62\u9a8c\u8bc1 (\u5f02\u6b65)...");
+        int[] nArray = new int[]{0};
+        AtomicInteger atomicInteger = new AtomicInteger(0);
+        AtomicInteger atomicInteger2 = new AtomicInteger(0);
+        double d = this.plugin.worlds().borderHalf();
+        int n = 16;
+        int n2 = (int)Math.floor(-d / (double)n);
+        int n3 = (int)Math.ceil(d / (double)n);
+        ArrayList<int[]> arrayList = new ArrayList<int[]>();
+        int n4 = n2;
+        while (n4 <= n3) {
+            arrayList.add(new int[]{n4, n2});
+            arrayList.add(new int[]{n4, n3});
+            arrayList.add(new int[]{n2, n4});
+            arrayList.add(new int[]{n3, n4++});
         }
-        // 抽样: 每 4 个边界区块取 1 个 (减少加载压力)
-        List<int[]> sample = new ArrayList<>();
-        for (int i = 0; i < borderChunks.size(); i += 4) sample.add(borderChunks.get(i));
-        // 加上 4 个内部区块 (中心附近)
-        sample.add(new int[]{0, 0});
-        sample.add(new int[]{8, 8});
-        sample.add(new int[]{-8, -8});
-
-        for (int[] c : sample) {
-            pending.incrementAndGet();
-            final int cx = c[0], cz = c[1];
-            world.getChunkAtAsync(cx, cz).whenComplete((chunk, err) -> {
+        ArrayList<int[]> arrayList2 = new ArrayList<int[]>();
+        for (int i = 0; i < arrayList.size(); i += 4) {
+            arrayList2.add((int[])arrayList.get(i));
+        }
+        arrayList2.add(new int[]{0, 0});
+        arrayList2.add(new int[]{8, 8});
+        arrayList2.add(new int[]{-8, -8});
+        for (int[] nArray2 : arrayList2) {
+            atomicInteger2.incrementAndGet();
+            int n5 = nArray2[0];
+            int n6 = nArray2[1];
+            world.getChunkAtAsync(n5, n6).whenComplete((chunk, throwable) -> {
                 try {
-                    if (err != null) {
-                        plugin.getLogger().warning("地形验证区块加载失败 (" + cx + "," + cz + "): " + err);
+                    if (throwable != null) {
+                        this.plugin.getLogger().warning("\u5730\u5f62\u9a8c\u8bc1\u533a\u5757\u52a0\u8f7d\u5931\u8d25 (" + n5 + "," + n6 + "): " + String.valueOf(throwable));
                         return;
                     }
-                    checked.incrementAndGet();
-                    if (chunk != null) validateChunk(chunk, sampled);
-                } finally {
-                    if (pending.decrementAndGet() == 0) {
-                        plugin.getLogger().info("地形验证完成: 抽查 " + checked.get() + " 区块, " + sampled[0] + " 处提示");
+                    atomicInteger.incrementAndGet();
+                    if (chunk != null) {
+                        this.validateChunk((Chunk)chunk, nArray);
+                    }
+                }
+                finally {
+                    if (atomicInteger2.decrementAndGet() == 0) {
+                        this.plugin.getLogger().info("\u5730\u5f62\u9a8c\u8bc1\u5b8c\u6210: \u62bd\u67e5 " + atomicInteger.get() + " \u533a\u5757, " + nArray[0] + " \u5904\u63d0\u793a");
                     }
                 }
             });
         }
     }
 
-    /** 校验单个区块 (区域线程, 只抽查表面方块避免全高遍历) */
-    private void validateChunk(Chunk chunk, int[] sampled) {
+    private void validateChunk(Chunk chunk, int[] nArray) {
+        int[][] nArrayArray;
         World world = chunk.getWorld();
-        int cx = chunk.getX(), cz = chunk.getZ();
-        // 只对区块四角 + 中心的表面方块做抽查 (避免遍历全高 384 层)
-        int[][] pts = {{0, 0}, {7, 7}, {15, 15}, {0, 15}, {15, 0}};
-        for (int[] p : pts) {
+        int n = chunk.getX();
+        int n2 = chunk.getZ();
+        for (int[] nArray2 : nArrayArray = new int[][]{{0, 0}, {7, 7}, {15, 15}, {0, 15}, {15, 0}}) {
             try {
-                int y = world.getHighestBlockYAt(cx * 16 + p[0], cz * 16 + p[1]);
-                Block b = world.getBlockAt(cx * 16 + p[0], y, cz * 16 + p[1]);
-                validateBlock(b, sampled);
-            } catch (Throwable t) {
-                // 跨区块读取降级, 忽略
+                int n3 = world.getHighestBlockYAt(n * 16 + nArray2[0], n2 * 16 + nArray2[1]);
+                Block block = world.getBlockAt(n * 16 + nArray2[0], n3, n2 * 16 + nArray2[1]);
+                this.validateBlock(block, nArray);
+            }
+            catch (Throwable throwable) {
+                // empty catch block
             }
         }
     }
 
-    /** 抽查单个方块 */
-    private void validateBlock(Block block, int[] sampled) {
-        if (block == null) return;
-        // 深层异常方块
-        if (block.getY() < 10 && block.getType() != org.bukkit.Material.BEDROCK
-                && block.getType() != org.bukkit.Material.STONE) {
-            sampled[0]++;
-            plugin.getLogger().warning("深层异常方块: " + block.getType() + " at "
-                    + block.getX() + "," + block.getY() + "," + block.getZ());
+    private void validateBlock(Block block, int[] nArray) {
+        Block block2;
+        if (block == null) {
+            return;
         }
-        // 液体悬空
-        if (block.getType().name().contains("WATER") || block.getType().name().contains("LAVA")) {
-            Block below = block.getRelative(0, -1, 0);
-            if (below.getType().isAir()) {
-                sampled[0]++;
-                plugin.getLogger().warning("液体悬空: " + block.getType() + " at "
-                        + block.getX() + "," + block.getY() + "," + block.getZ());
-            }
+        if (block.getY() < 10 && block.getType() != Material.BEDROCK && block.getType() != Material.STONE) {
+            nArray[0] = nArray[0] + 1;
+            this.plugin.getLogger().warning("\u6df1\u5c42\u5f02\u5e38\u65b9\u5757: " + String.valueOf(block.getType()) + " at " + block.getX() + "," + block.getY() + "," + block.getZ());
+        }
+        if ((block.getType().name().contains("WATER") || block.getType().name().contains("LAVA")) && (block2 = block.getRelative(0, -1, 0)).getType().isAir()) {
+            nArray[0] = nArray[0] + 1;
+            this.plugin.getLogger().warning("\u6db2\u4f53\u60ac\u7a7a: " + String.valueOf(block.getType()) + " at " + block.getX() + "," + block.getY() + "," + block.getZ());
         }
     }
 }

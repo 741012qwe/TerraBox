@@ -1,132 +1,125 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Material
+ *  org.bukkit.OfflinePlayer
+ *  org.bukkit.Sound
+ *  org.bukkit.entity.Player
+ *  org.bukkit.inventory.Inventory
+ *  org.bukkit.inventory.InventoryHolder
+ *  org.bukkit.inventory.ItemStack
+ */
 package com.terrabox;
 
+import com.terrabox.GuiListener;
+import com.terrabox.MainMenuGui;
+import com.terrabox.PlayerStore;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
-/**
- * 物资回收商店 GUI (54格):
- *  - 0..44: 玩家放置待回收物品
- *  - 48 说明 / 49 确认出售 / 53 关闭
- * 线程模型: 点击结算发生在玩家区域线程 (InventoryClickEvent), 直接读写 Inventory 合法
- */
 public class SellGui {
-    public static final String TITLE = "§8[§6物资大陆§8] §a物资回收商店";
+    public static final String TITLE = "\u00a78[\u00a76\u7269\u8d44\u5927\u9646\u00a78] \u00a7a\u7269\u8d44\u56de\u6536\u5546\u5e97";
     public static final int CONFIRM_SLOT = 49;
-
     private final TerraBoxPlugin plugin;
 
-    public SellGui(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public SellGui(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    public void open(Player p) {
-        GuiListener.GuiHolder holder = new GuiListener.GuiHolder(GuiListener.Type.SELL);
-        Inventory inv = Bukkit.createInventory(holder, 54, TITLE);
-        holder.inv = inv;
-        inv.setItem(48, MainMenuGui.button(Material.BOOK, "§e回收说明",
-                List.of("§7把要出售的物品放到上方 45 格中",
-                        "§7然后点击 §a确认出售 §7按钮",
-                        "§7价格为每件单价, 支持成组结算",
-                        "§7无法回收的物品会留在格子里",
-                        "", "§e输入 /box prices 查看价格表")));
-        inv.setItem(CONFIRM_SLOT, MainMenuGui.button(Material.EMERALD, "§a§l确认出售",
-                List.of("§7点击结算上方所有可回收物品")));
-        inv.setItem(53, MainMenuGui.button(Material.BARRIER, "§c关闭商店",
-                List.of("§7未出售的物品会退回背包")));
-
-        p.openInventory(inv);
+    public void open(Player player) {
+        Inventory inventory;
+        GuiListener.GuiHolder guiHolder = new GuiListener.GuiHolder(GuiListener.Type.SELL);
+        guiHolder.inv = inventory = Bukkit.createInventory((InventoryHolder)guiHolder, (int)54, (String)TITLE);
+        inventory.setItem(48, MainMenuGui.button(Material.BOOK, "\u00a7e\u56de\u6536\u8bf4\u660e", List.of("\u00a77\u628a\u8981\u51fa\u552e\u7684\u7269\u54c1\u653e\u5230\u4e0a\u65b9 45 \u683c\u4e2d", "\u00a77\u7136\u540e\u70b9\u51fb \u00a7a\u786e\u8ba4\u51fa\u552e \u00a77\u6309\u94ae", "\u00a77\u4ef7\u683c\u4e3a\u6bcf\u4ef6\u5355\u4ef7, \u652f\u6301\u6210\u7ec4\u7ed3\u7b97", "\u00a77\u65e0\u6cd5\u56de\u6536\u7684\u7269\u54c1\u4f1a\u7559\u5728\u683c\u5b50\u91cc", "", "\u00a7e\u8f93\u5165 /box prices \u67e5\u770b\u4ef7\u683c\u8868")));
+        inventory.setItem(49, MainMenuGui.button(Material.EMERALD, "\u00a7a\u00a7l\u786e\u8ba4\u51fa\u552e", List.of("\u00a77\u70b9\u51fb\u7ed3\u7b97\u4e0a\u65b9\u6240\u6709\u53ef\u56de\u6536\u7269\u54c1")));
+        inventory.setItem(53, MainMenuGui.button(Material.BARRIER, "\u00a7c\u5173\u95ed\u5546\u5e97", List.of("\u00a77\u672a\u51fa\u552e\u7684\u7269\u54c1\u4f1a\u9000\u56de\u80cc\u5305")));
+        player.openInventory(inventory);
     }
 
-    /** 结算 (玩家区域线程): 0..44 逐格按价回收 */
-    public void settle(Player p, Inventory inv) {
-        Map<String, Double> prices = plugin.sellPrices();
-        long money = 0;
-        int count = 0;
-        List<String> rejected = new ArrayList<>();
-        for (int slot = 0; slot < 45; slot++) {
-            ItemStack it = inv.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            // 特殊道具不可回收 (功能性道具)
-            if (plugin.specialItems() != null && plugin.specialItems().isSpecial(it)) {
-                if (rejected.size() < 5 && !rejected.contains(it.getType().name())) {
-                    rejected.add(it.getType().name() + "(特殊道具)");
-                }
+    public void settle(Player player, Inventory inventory) {
+        Map<String, Double> map = this.plugin.sellPrices();
+        long l = 0L;
+        int n = 0;
+        ArrayList<Object> arrayList = new ArrayList<Object>();
+        for (int i = 0; i < 45; ++i) {
+            ItemStack itemStack = inventory.getItem(i);
+            if (itemStack == null || itemStack.getType().isAir()) continue;
+            if (this.plugin.specialItems() != null && this.plugin.specialItems().isSpecial(itemStack)) {
+                if (arrayList.size() >= 5 || arrayList.contains(itemStack.getType().name())) continue;
+                arrayList.add(itemStack.getType().name() + "(\u7279\u6b8a\u9053\u5177)");
                 continue;
             }
-            // 神器不可回收 (终极装备)
-            if (plugin.artifacts() != null && plugin.artifacts().isArtifact(it)) {
-                if (rejected.size() < 5 && !rejected.contains(it.getType().name())) {
-                    rejected.add(it.getType().name() + "(神器)");
-                }
+            if (this.plugin.artifacts() != null && this.plugin.artifacts().isArtifact(itemStack)) {
+                if (arrayList.size() >= 5 || arrayList.contains(itemStack.getType().name())) continue;
+                arrayList.add(itemStack.getType().name() + "(\u795e\u5668)");
                 continue;
             }
-            // 附魔石不可回收
-            if (plugin.enchants() != null && plugin.enchants().isEnchantStone(it)) {
-                if (rejected.size() < 5 && !rejected.contains(it.getType().name())) {
-                    rejected.add(it.getType().name() + "(附魔石)");
-                }
+            if (this.plugin.enchants() != null && this.plugin.enchants().isEnchantStone(itemStack)) {
+                if (arrayList.size() >= 5 || arrayList.contains(itemStack.getType().name())) continue;
+                arrayList.add(itemStack.getType().name() + "(\u9644\u9b54\u77f3)");
                 continue;
             }
-            // 碎片/材料不可回收 (合成材料)
-            if (plugin.crafts() != null && plugin.crafts().isCraftItem(it)) {
-                if (rejected.size() < 5 && !rejected.contains(it.getType().name())) {
-                    rejected.add(it.getType().name() + "(合成材料)");
-                }
+            if (this.plugin.crafts() != null && this.plugin.crafts().isCraftItem(itemStack)) {
+                if (arrayList.size() >= 5 || arrayList.contains(itemStack.getType().name())) continue;
+                arrayList.add(itemStack.getType().name() + "(\u5408\u6210\u6750\u6599)");
                 continue;
             }
-            Double price = prices.get(it.getType().name());
-            if (price == null || price <= 0) {
-                if (rejected.size() < 5 && !rejected.contains(it.getType().name())) {
-                    rejected.add(it.getType().name());
-                }
+            Double d = map.get(itemStack.getType().name());
+            if (d == null || d <= 0.0) {
+                if (arrayList.size() >= 5 || arrayList.contains(itemStack.getType().name())) continue;
+                arrayList.add(itemStack.getType().name());
                 continue;
             }
-            double value = price * it.getAmount();
-            money += (long) Math.floor(value);
-            inv.setItem(slot, null);
-            count += it.getAmount();
+            double d2 = d * (double)itemStack.getAmount();
+            l += (long)Math.floor(d2);
+            inventory.setItem(i, null);
+            n += itemStack.getAmount();
         }
-        if (count == 0 && money == 0) {
-            p.sendMessage(plugin.msg("sell-empty"));
+        if (n == 0 && l == 0L) {
+            player.sendMessage(this.plugin.msg("sell-empty"));
             return;
         }
-        if (money > 0) {
-            plugin.econ().deposit(p, money);
-            PlayerStore.PlayerData d = plugin.players().getOrCreate(p.getUniqueId(), p.getName());
-            d.soldValue.addAndGet(money);
-            d.touch();
+        if (l > 0L) {
+            this.plugin.econ().deposit((OfflinePlayer)player, l);
+            PlayerStore.PlayerData playerData = this.plugin.players().getOrCreate(player.getUniqueId(), player.getName());
+            playerData.soldValue.addAndGet(l);
+            playerData.touch();
         }
-        p.sendMessage(plugin.msg("sell-done")
-                .replace("{count}", String.valueOf(count))
-                .replace("{money}", String.valueOf(money)));
-        if (!rejected.isEmpty()) {
-            p.sendMessage(plugin.msg("prefix") + "§7以下物品暂不回收: §c" + String.join(", ", rejected));
+        player.sendMessage(this.plugin.msg("sell-done").replace("{count}", String.valueOf(n)).replace("{money}", String.valueOf(l)));
+        if (!arrayList.isEmpty()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u4ee5\u4e0b\u7269\u54c1\u6682\u4e0d\u56de\u6536: \u00a7c" + String.join((CharSequence)", ", arrayList));
         }
-        p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_YES, 1f, 1.2f);
+        player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_YES, 1.0f, 1.2f);
     }
 
-    /** 关闭商店: 退回未出售物品 (玩家区域线程, 溢出掉落在脚边) */
-    public void returnItems(Player p, Inventory inv) {
-        List<ItemStack> leftover = new ArrayList<>();
-        for (int slot = 0; slot < 45; slot++) {
-            ItemStack it = inv.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            leftover.add(it);
-            inv.setItem(slot, null);
+    public void returnItems(Player player, Inventory inventory) {
+        ArrayList<ItemStack> arrayList = new ArrayList<ItemStack>();
+        for (int i = 0; i < 45; ++i) {
+            ItemStack itemStack = inventory.getItem(i);
+            if (itemStack == null || itemStack.getType().isAir()) continue;
+            arrayList.add(itemStack);
+            inventory.setItem(i, null);
         }
-        if (leftover.isEmpty()) return;
-        var map = p.getInventory().addItem(leftover.toArray(new ItemStack[0]));
-        for (ItemStack rest : map.values()) {
-            p.getWorld().dropItemNaturally(p.getLocation(), rest);
+        if (arrayList.isEmpty()) {
+            return;
         }
-        p.sendMessage(plugin.msg("prefix") + "§7商店物品已退回背包(溢出掉落)。" + map.size());
+        HashMap hashMap = player.getInventory().addItem(arrayList.toArray(new ItemStack[0]));
+        for (ItemStack itemStack : hashMap.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), itemStack);
+        }
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u5546\u5e97\u7269\u54c1\u5df2\u9000\u56de\u80cc\u5305(\u6ea2\u51fa\u6389\u843d)\u3002" + hashMap.size());
     }
 }

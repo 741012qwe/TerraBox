@@ -1,200 +1,223 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.TextComponent
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.configuration.ConfigurationSection
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ *  org.bukkit.persistence.PersistentDataContainer
+ *  org.bukkit.persistence.PersistentDataType
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
-
+import com.terrabox.TerraBoxPlugin;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 神器合成系统 —— 碎片/材料 + 工作台配方
- *
- * 玩法:
- *  - 碎片/材料从物资箱掉落 (loot 表 items 里用 craft: <key> 引用)
- *  - 玩家收集碎片+材料, 打开工作台配方 GUI (/box craft), 放入材料点击合成
- *  - 达到配方要求, 即合成对应神器 (ArtifactManager.buildItem 构建)
- *
- * 碎片/材料标记: PDC terrabox_craft = key。碎片可归属某件神器 (terrabox_craft_artifact=artifactKey),
- *   通用材料不归属 (为 null)。每个配方 = 若干碎片/材料条目 {fragment:key, count:n}。
- *
- * 线程模型: 构建物品为纯对象; 合成在玩家区域线程 (InventoryClickEvent) 校验并收走材料。
- */
 public class CraftManager {
     private final TerraBoxPlugin plugin;
     private final NamespacedKey keyCraft;
     private final NamespacedKey keyArtifact;
-    private final Map<String, CraftDef> defs = new HashMap<>();
-    private final List<Recipe> recipes = new ArrayList<>();
+    private final Map<String, CraftDef> defs = new HashMap<String, CraftDef>();
+    private final List<Recipe> recipes = new ArrayList<Recipe>();
 
-    /** 碎片/材料定义 */
-    public record CraftDef(Material material, String key, String name, List<String> lore, String artifact) {}
-
-    /** 配方: 产出神器 artifact, 需要 ingredients (fragment->count) */
-    public record Recipe(String artifact, LinkedHashMap<String, Integer> ingredients) {}
-
-    public CraftManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.keyCraft = new NamespacedKey(plugin, "craft");
-        this.keyArtifact = new NamespacedKey(plugin, "craft_artifact");
+    public CraftManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.keyCraft = new NamespacedKey((Plugin)terraBoxPlugin, "craft");
+        this.keyArtifact = new NamespacedKey((Plugin)terraBoxPlugin, "craft_artifact");
     }
 
     public void load() {
-        defs.clear();
-        recipes.clear();
-        var dsec = plugin.getConfig().getConfigurationSection("crafting.fragments");
-        if (dsec != null) {
-            for (String key : dsec.getKeys(false)) {
-                var s = dsec.getConfigurationSection(key);
-                if (s == null) continue;
+        Cloneable cloneable;
+        String string;
+        Material material;
+        ConfigurationSection configurationSection;
+        this.defs.clear();
+        this.recipes.clear();
+        ConfigurationSection configurationSection2 = this.plugin.getConfig().getConfigurationSection("crafting.fragments");
+        if (configurationSection2 != null) {
+            configurationSection = configurationSection2.getKeys(false).iterator();
+            while (configurationSection.hasNext()) {
+                String string2 = (String)configurationSection.next();
+                Object object = configurationSection2.getConfigurationSection(string2);
+                if (object == null) continue;
                 try {
-                    Material mat = Material.matchMaterial(s.getString("material", "DIAMOND").toUpperCase(Locale.ROOT));
-                    if (mat == null || !mat.isItem()) {
-                        plugin.getLogger().warning("合成材料 [" + key + "] 材质无效: " + s.getString("material"));
+                    material = Material.matchMaterial((String)object.getString("material", "DIAMOND").toUpperCase(Locale.ROOT));
+                    if (material == null || !material.isItem()) {
+                        this.plugin.getLogger().warning("\u5408\u6210\u6750\u6599 [" + (String)string2 + "] \u6750\u8d28\u65e0\u6548: " + object.getString("material"));
                         continue;
                     }
-                    String name = s.getString("name", "&e&l" + key);
-                    List<String> lore = new ArrayList<>(s.getStringList("lore"));
-                    String artifact = s.getString("artifact", null);
-                    defs.put(key.toLowerCase(Locale.ROOT), new CraftDef(mat, key.toLowerCase(Locale.ROOT), name, lore, artifact));
-                } catch (Exception e) {
-                    plugin.getLogger().warning("合成材料 [" + key + "] 解析失败: " + e.getMessage());
+                    string = object.getString("name", "&e&l" + (String)string2);
+                    cloneable = new ArrayList(object.getStringList("lore"));
+                    String string3 = object.getString("artifact", null);
+                    this.defs.put(string2.toLowerCase(Locale.ROOT), new CraftDef(material, string2.toLowerCase(Locale.ROOT), string, (List<String>)((Object)cloneable), string3));
+                }
+                catch (Exception exception) {
+                    this.plugin.getLogger().warning("\u5408\u6210\u6750\u6599 [" + (String)string2 + "] \u89e3\u6790\u5931\u8d25: " + exception.getMessage());
                 }
             }
         }
-        // 配置缺失时内置默认碎片/材料 (兜底)
-        if (defs.isEmpty()) registerDefaultDefs();
-
-        // 配方
-        var rsec = plugin.getConfig().getConfigurationSection("crafting.recipes");
-        if (rsec != null) {
-            for (String key : rsec.getKeys(false)) {
-                var s = rsec.getConfigurationSection(key);
-                if (s == null) continue;
+        if (this.defs.isEmpty()) {
+            this.registerDefaultDefs();
+        }
+        if ((configurationSection = this.plugin.getConfig().getConfigurationSection("crafting.recipes")) != null) {
+            for (Object object : configurationSection.getKeys(false)) {
+                material = configurationSection.getConfigurationSection((String)object);
+                if (material == null) continue;
                 try {
-                    String artifact = s.getString("artifact", key);
-                    LinkedHashMap<String, Integer> ing = new LinkedHashMap<>();
-                    for (String ingKey : s.getKeys(false)) {
-                        if (ingKey.equals("artifact")) continue;
-                        int count = Math.max(1, s.getInt(ingKey, 1));
-                        ing.put(ingKey.toLowerCase(Locale.ROOT), count);
+                    string = material.getString("artifact", (String)object);
+                    cloneable = new LinkedHashMap();
+                    for (String string4 : material.getKeys(false)) {
+                        if (string4.equals("artifact")) continue;
+                        int n = Math.max(1, material.getInt(string4, 1));
+                        ((HashMap)cloneable).put(string4.toLowerCase(Locale.ROOT), n);
                     }
-                    if (!ing.isEmpty()) recipes.add(new Recipe(artifact, ing));
-                } catch (Exception e) {
-                    plugin.getLogger().warning("配方 [" + key + "] 解析失败: " + e.getMessage());
+                    if (((HashMap)cloneable).isEmpty()) continue;
+                    this.recipes.add(new Recipe(string, (LinkedHashMap<String, Integer>)cloneable));
+                }
+                catch (Exception exception) {
+                    this.plugin.getLogger().warning("\u914d\u65b9 [" + (String)object + "] \u89e3\u6790\u5931\u8d25: " + exception.getMessage());
                 }
             }
         }
-        // 配置缺失或无配方时内置默认配方 (兜底)
-        if (recipes.isEmpty()) registerDefaultRecipes();
-        plugin.getLogger().info("合成系统加载完成: " + defs.size() + " 种碎片/材料, " + recipes.size() + " 条配方");
-    }
-
-    /** 内置默认碎片/材料 (config 缺失兜底) */
-    private void registerDefaultDefs() {
-        // 无 crafting 配置时, 不注册任何碎片/材料 (合成系统禁用)
-        // 碎片/材料仅在 config.yml 中有 crafting.fragments 段时才生效
-    }
-
-    /** 内置默认配方 (config 缺失兜底) */
-    private void registerDefaultRecipes() {
-        // 无 crafting 配置时, 不注册任何配方 (合成系统禁用)
-    }
-
-    private static LinkedHashMap<String, Integer> linked(Object... kv) {
-        LinkedHashMap<String, Integer> m = new LinkedHashMap<>();
-        for (int i = 0; i < kv.length; i += 2) m.put(String.valueOf(kv[i]), Integer.parseInt(String.valueOf(kv[i + 1])));
-        return m;
-    }
-
-    /** 按 key 构建碎片/材料 (任意线程) */
-    public ItemStack buildItem(String key) {
-        CraftDef def = defs.get(key.toLowerCase(Locale.ROOT));
-        if (def == null) return null;
-        ItemStack it = new ItemStack(def.material(), 1);
-        ItemMeta meta = it.getItemMeta();
-        if (meta != null) {
-            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(def.name()));
-            List<Component> lore = new ArrayList<>();
-            lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&8&m            &r&b&l 合成材料 &8&m            "));
-            for (String line : def.lore())
-                lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
-            lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&7&o可用于工作台合成神器"));
-            meta.lore(lore);
-            it.setItemMeta(meta);
+        if (this.recipes.isEmpty()) {
+            this.registerDefaultRecipes();
         }
-        it.editMeta(m -> {
-            var pdc = m.getPersistentDataContainer();
-            pdc.set(keyCraft, PersistentDataType.STRING, def.key());
-            if (def.artifact() != null)
-                pdc.set(keyArtifact, PersistentDataType.STRING, def.artifact());
+        this.plugin.getLogger().info("\u5408\u6210\u7cfb\u7edf\u52a0\u8f7d\u5b8c\u6210: " + this.defs.size() + " \u79cd\u788e\u7247/\u6750\u6599, " + this.recipes.size() + " \u6761\u914d\u65b9");
+    }
+
+    private void registerDefaultDefs() {
+    }
+
+    private void registerDefaultRecipes() {
+    }
+
+    private static LinkedHashMap<String, Integer> linked(Object ... objectArray) {
+        LinkedHashMap<String, Integer> linkedHashMap = new LinkedHashMap<String, Integer>();
+        for (int i = 0; i < objectArray.length; i += 2) {
+            linkedHashMap.put(String.valueOf(objectArray[i]), Integer.parseInt(String.valueOf(objectArray[i + 1])));
+        }
+        return linkedHashMap;
+    }
+
+    public ItemStack buildItem(String string) {
+        CraftDef craftDef = this.defs.get(string.toLowerCase(Locale.ROOT));
+        if (craftDef == null) {
+            return null;
+        }
+        ItemStack itemStack = new ItemStack(craftDef.material(), 1);
+        ItemMeta itemMeta2 = itemStack.getItemMeta();
+        if (itemMeta2 != null) {
+            itemMeta2.displayName((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(craftDef.name()));
+            ArrayList<TextComponent> arrayList = new ArrayList<TextComponent>();
+            arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&8&m            &r&b&l \u5408\u6210\u6750\u6599 &8&m            "));
+            for (String string2 : craftDef.lore()) {
+                arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize(string2));
+            }
+            arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&7&o\u53ef\u7528\u4e8e\u5de5\u4f5c\u53f0\u5408\u6210\u795e\u5668"));
+            itemMeta2.lore(arrayList);
+            itemStack.setItemMeta(itemMeta2);
+        }
+        itemStack.editMeta(itemMeta -> {
+            PersistentDataContainer persistentDataContainer = itemMeta.getPersistentDataContainer();
+            persistentDataContainer.set(this.keyCraft, PersistentDataType.STRING, (Object)craftDef.key());
+            if (craftDef.artifact() != null) {
+                persistentDataContainer.set(this.keyArtifact, PersistentDataType.STRING, (Object)craftDef.artifact());
+            }
         });
-        return it;
+        return itemStack;
     }
 
-    /** 判断是否为碎片/材料, 返回 key (非则 null) */
-    public String craftKey(ItemStack it) {
-        if (it == null || it.getType() == Material.AIR) return null;
+    public String craftKey(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return null;
+        }
         try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keyCraft, PersistentDataType.STRING);
-        } catch (Throwable t) { return null; }
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyCraft, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
     }
 
-    public boolean isCraftItem(ItemStack it) { return craftKey(it) != null; }
+    public boolean isCraftItem(ItemStack itemStack) {
+        return this.craftKey(itemStack) != null;
+    }
 
-    /** 碎片归属的神器 key (通用材料返回 null) */
-    public String fragmentArtifact(ItemStack it) {
-        if (it == null) return null;
+    public String fragmentArtifact(ItemStack itemStack) {
+        if (itemStack == null) {
+            return null;
+        }
         try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keyArtifact, PersistentDataType.STRING);
-        } catch (Throwable t) { return null; }
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyArtifact, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
     }
 
-    /** 所有碎片/材料 key (管理/展示用) */
-    public List<String> keys() { return new ArrayList<>(defs.keySet()); }
-
-    /** 所有碎片/材料定义 (管理/展示用) */
-    public List<CraftDef> defs() { return new ArrayList<>(defs.values()); }
-
-    /** 碎片/材料显示名 (未找到返回 key), 返回 § 码文本 */
-    public String nameOf(String key) {
-        CraftDef d = defs.get(key.toLowerCase(Locale.ROOT));
-        if (d == null) return key;
-        return LegacyComponentSerializer.legacySection()
-                .serialize(LegacyComponentSerializer.legacyAmpersand().deserialize(d.name()));
+    public List<String> keys() {
+        return new ArrayList<String>(this.defs.keySet());
     }
 
-    /** 所有配方 (管理/展示用) */
-    public List<Recipe> recipes() { return new ArrayList<>(recipes); }
+    public List<CraftDef> defs() {
+        return new ArrayList<CraftDef>(this.defs.values());
+    }
 
-    public Recipe recipeFor(String artifactKey) {
-        for (Recipe r : recipes)
-            if (r.artifact().equalsIgnoreCase(artifactKey)) return r;
+    public String nameOf(String string) {
+        CraftDef craftDef = this.defs.get(string.toLowerCase(Locale.ROOT));
+        if (craftDef == null) {
+            return string;
+        }
+        return LegacyComponentSerializer.legacySection().serialize((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(craftDef.name()));
+    }
+
+    public List<Recipe> recipes() {
+        return new ArrayList<Recipe>(this.recipes);
+    }
+
+    public Recipe recipeFor(String string) {
+        for (Recipe recipe : this.recipes) {
+            if (!recipe.artifact().equalsIgnoreCase(string)) continue;
+            return recipe;
+        }
         return null;
     }
 
-    /**
-     * 校验玩家背包中是否有足够材料满足配方 (不含 workbench 材料槽, 直接查询背包)
-     * 供配方 GUI 展示"当前拥有"数量用。
-     */
-    public Map<String, Integer> ownedCounts(ItemStack[] bag, Recipe recipe) {
-        Map<String, Integer> have = new HashMap<>();
-        for (ItemStack it : bag) {
-            if (it == null) continue;
-            String k = craftKey(it);
-            if (k == null) continue;
-            have.merge(k, it.getAmount(), Integer::sum);
+    public Map<String, Integer> ownedCounts(ItemStack[] itemStackArray, Recipe recipe) {
+        HashMap<String, Integer> hashMap = new HashMap<String, Integer>();
+        for (ItemStack itemStack : itemStackArray) {
+            String string;
+            if (itemStack == null || (string = this.craftKey(itemStack)) == null) continue;
+            hashMap.merge(string, itemStack.getAmount(), Integer::sum);
         }
-        return have;
+        return hashMap;
+    }
+
+    public record CraftDef(Material material, String key, String name, List<String> lore, String artifact) {
+    }
+
+    public record Recipe(String artifact, LinkedHashMap<String, Integer> ingredients) {
     }
 }

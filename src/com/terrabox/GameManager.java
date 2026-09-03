@@ -1,699 +1,753 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Bukkit
+ *  org.bukkit.GameMode
+ *  org.bukkit.OfflinePlayer
+ *  org.bukkit.Sound
+ *  org.bukkit.World
+ *  org.bukkit.command.CommandSender
+ *  org.bukkit.entity.Entity
+ *  org.bukkit.entity.Player
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
-import org.bukkit.Location;
-import org.bukkit.Sound;
-import org.bukkit.World;
-import org.bukkit.entity.Player;
-import org.bukkit.potion.PotionEffectType;
+import com.terrabox.ScoreboardManager;
+import com.terrabox.TerraBoxPlugin;
+import com.terrabox.ZoneManager;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
-
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 对局玩法 (吃鸡式资源争夺, PVP):
- *  - 模式: SOLO 单人(无PvP, 时间制积分结算, 管理员可开) / PVP 玩家对战(淘汰制) / TEAM 组队对战
- *  - 状态机: IDLE → COUNTDOWN(倒计时) → RUNNING(进行) → ENDING(结算) → 自动恢复地形 → IDLE
- *  - 计分板: 存活数/击杀/死亡/开箱/剩余时间实时统计 (ScoreboardManager)
- *  - 淘汰: 被淘汰玩家可回大厅或旁观 (观战)
- *  - 结束: 倒计时结束 / 仅剩1人 → 自动送剩余玩家回大厅
- *  - 结束自动恢复地形: 清空重放箱子 + 重建建筑/出生广场
- *
- * 线程模型 (白皮书 §4/§5/§6):
- *  - 集合全部并发安全; 倒计时/结束检测 GlobalRegionScheduler 每秒
- *  - 玩家传送 teleportAsync; 状态复位 EntityScheduler
- */
 public class GameManager {
-    public enum Mode {
-        SOLO("单人模式", "§a"),
-        PVP("玩家对战", "§c"),
-        TEAM("组队对战", "§6");
-        public final String display;
-        public final String color;
-        Mode(String display, String color) {
-            this.display = display;
-            this.color = color;
-        }
-        public static Mode parse(String s) {
-            for (Mode m : values()) {
-                if (m.name().equalsIgnoreCase(s) || m.display.equals(s)) return m;
-            }
-            return null;
-        }
-    }
-
-    public enum State {
-        IDLE("空闲", "§7"),
-        COUNTDOWN("准备中", "§e"),
-        RUNNING("进行中", "§a"),
-        ENDING("结算中", "§d");
-        public final String display;
-        public final String color;
-        State(String display, String color) {
-            this.display = display;
-            this.color = color;
-        }
-    }
-
     private final TerraBoxPlugin plugin;
-    // 房间绑定: 每个房间绑定一个 arena 世界名 + 独立计分板 (多房间并存)
     private final String roomId;
     private final String roomWorldName;
-    private volatile UUID owner; // 房间创建者 (可邀请玩家), null=系统/管理员房间
-    private volatile ScoreboardManager roomScoreboard; // 独立计分板 (多房间), null 则用全局单例
+    private volatile UUID owner;
+    private volatile ScoreboardManager roomScoreboard;
     private volatile State state = State.IDLE;
     private volatile Mode mode = Mode.SOLO;
-    private final CopyOnWriteArraySet<UUID> joined = new CopyOnWriteArraySet<>();
-    private final CopyOnWriteArraySet<UUID> players = new CopyOnWriteArraySet<>();
-    private final CopyOnWriteArraySet<UUID> eliminated = new CopyOnWriteArraySet<>();
-    private final Map<UUID, Integer> teams = new ConcurrentHashMap<>();
-    private final List<UUID> joinOrder = new java.util.concurrent.CopyOnWriteArrayList<>();
-    private volatile long endAt = 0;
-    private volatile long startAt = 0;          // 对局正式开始时刻 (用于10分钟追踪器发放)
-    private volatile boolean trackerGiven = false; // 是否已发放过追踪器
+    private final CopyOnWriteArraySet<UUID> joined = new CopyOnWriteArraySet();
+    private final CopyOnWriteArraySet<UUID> players = new CopyOnWriteArraySet();
+    private final CopyOnWriteArraySet<UUID> eliminated = new CopyOnWriteArraySet();
+    private final Map<UUID, Integer> teams = new ConcurrentHashMap<UUID, Integer>();
+    private final List<UUID> joinOrder = new CopyOnWriteArrayList<UUID>();
+    private volatile long endAt = 0L;
+    private volatile long startAt = 0L;
+    private volatile boolean trackerGiven = false;
     private volatile int countdownLeft = 0;
     private volatile String currentWinner = null;
     private ScheduledTask tickTask;
-    // 毒圈 (每个房间一个实例, 对局运行中激活)
     private final ZoneManager storm;
 
-    public GameManager(TerraBoxPlugin plugin) {
-        this(plugin, "default", null);
+    public GameManager(TerraBoxPlugin terraBoxPlugin) {
+        this(terraBoxPlugin, "default", null);
     }
 
-    /** 多房间构造: 绑定世界名 + 独立计分板 (roomScoreboard null 则用全局单例) */
-    public GameManager(TerraBoxPlugin plugin, String roomId, String roomWorldName) {
-        this.plugin = plugin;
-        this.roomId = roomId;
-        this.roomWorldName = roomWorldName;
-        this.storm = new ZoneManager(plugin, this);
+    public GameManager(TerraBoxPlugin terraBoxPlugin, String string, String string2) {
+        this.plugin = terraBoxPlugin;
+        this.roomId = string;
+        this.roomWorldName = string2;
+        this.storm = new ZoneManager(terraBoxPlugin, this);
     }
 
-    public ZoneManager storm() { return storm; }
+    public ZoneManager storm() {
+        return this.storm;
+    }
 
-    public String roomId() { return roomId; }
-    public String roomWorldName() { return roomWorldName; }
+    public String roomId() {
+        return this.roomId;
+    }
 
-    /** 本房间绑定的对局世界 (绑定则用之, 否则回退当前 arena 世界) */
+    public String roomWorldName() {
+        return this.roomWorldName;
+    }
+
     public World roomWorld() {
-        if (roomWorldName != null) {
-            World w = Bukkit.getWorld(roomWorldName);
-            if (w != null) return w;
+        World world;
+        if (this.roomWorldName != null && (world = Bukkit.getWorld((String)this.roomWorldName)) != null) {
+            return world;
         }
-        return plugin.worlds().world();
+        return this.plugin.worlds().world();
     }
 
-    /** 本房间使用的计分板 (独立实例 / 全局单例) */
     public ScoreboardManager myScoreboard() {
-        return roomScoreboard != null ? roomScoreboard : plugin.scoreboard();
+        return this.roomScoreboard != null ? this.roomScoreboard : this.plugin.scoreboard();
     }
 
-    /** 设置独立计分板 (多房间由 RoomManager 注入) */
-    public void setRoomScoreboard(ScoreboardManager sb) { this.roomScoreboard = sb; }
+    public void setRoomScoreboard(ScoreboardManager scoreboardManager) {
+        this.roomScoreboard = scoreboardManager;
+    }
 
-    public State state() { return state; }
-    public Mode mode() { return mode; }
-    public boolean isRunning() { return state == State.RUNNING || state == State.COUNTDOWN; }
-    public boolean isInGame(UUID uuid) { return players.contains(uuid) && !eliminated.contains(uuid); }
-    public boolean isEliminated(UUID uuid) { return eliminated.contains(uuid); }
-    public int joinedCount() { return joined.size(); }
-    public int playerCount() { return players.size(); }
-    public java.util.Set<UUID> playersSet() { return java.util.Collections.unmodifiableSet(players); }
-    public java.util.Set<UUID> eliminatedSet() { return java.util.Collections.unmodifiableSet(eliminated); }
-    public long endAtMs() { return endAt; }
-    public int countdownLeft() { return Math.max(0, countdownLeft); }
-    public List<UUID> inGamePlayers() { return List.copyOf(players); }
+    public State state() {
+        return this.state;
+    }
 
-    public String stateDisplay() { return state.color + state.display; }
-    public String modeDisplay() { return mode.color + mode.display; }
+    public Mode mode() {
+        return this.mode;
+    }
+
+    public boolean isRunning() {
+        return this.state == State.RUNNING || this.state == State.COUNTDOWN;
+    }
+
+    public boolean isInGame(UUID uUID) {
+        return this.players.contains(uUID) && !this.eliminated.contains(uUID);
+    }
+
+    public boolean isEliminated(UUID uUID) {
+        return this.eliminated.contains(uUID);
+    }
+
+    public int joinedCount() {
+        return this.joined.size();
+    }
+
+    public int playerCount() {
+        return this.players.size();
+    }
+
+    public Set<UUID> playersSet() {
+        return Collections.unmodifiableSet(this.players);
+    }
+
+    public Set<UUID> eliminatedSet() {
+        return Collections.unmodifiableSet(this.eliminated);
+    }
+
+    public long endAtMs() {
+        return this.endAt;
+    }
+
+    public int countdownLeft() {
+        return Math.max(0, this.countdownLeft);
+    }
+
+    public List<UUID> inGamePlayers() {
+        return List.copyOf(this.players);
+    }
+
+    public String stateDisplay() {
+        return this.state.color + this.state.display;
+    }
+
+    public String modeDisplay() {
+        return this.mode.color + this.mode.display;
+    }
 
     public int aliveCount() {
-        int alive = 0;
-        for (UUID u : players) {
-            if (!eliminated.contains(u)) alive++;
+        int n = 0;
+        for (UUID uUID : this.players) {
+            if (this.eliminated.contains(uUID)) continue;
+            ++n;
         }
-        return alive;
+        return n;
     }
 
-    private java.util.Set<Integer> aliveTeams() {
-        java.util.Set<Integer> set = new java.util.HashSet<>();
-        for (UUID u : players) {
-            if (!eliminated.contains(u)) {
-                Integer t = teams.get(u);
-                if (t != null) set.add(t);
-            }
+    private Set<Integer> aliveTeams() {
+        HashSet<Integer> hashSet = new HashSet<Integer>();
+        for (UUID uUID : this.players) {
+            Integer n;
+            if (this.eliminated.contains(uUID) || (n = this.teams.get(uUID)) == null) continue;
+            hashSet.add(n);
         }
-        return set;
+        return hashSet;
     }
 
-    // ==================== 报名 ====================
-
-    public void toggleJoin(Player p) {
-        if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage(plugin.msg("prefix") + "§c对局正在进行中, 无法报名。");
+    public void toggleJoin(Player player) {
+        if (this.state == State.RUNNING || this.state == State.ENDING) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5bf9\u5c40\u6b63\u5728\u8fdb\u884c\u4e2d, \u65e0\u6cd5\u62a5\u540d\u3002");
             return;
         }
-        UUID u = p.getUniqueId();
-        if (joined.contains(u)) {
-            joined.remove(u);
-            joinOrder.remove(u);
-            players.remove(u);
-            eliminated.remove(u);
-            p.sendMessage(plugin.msg("prefix") + "§c已退出报名。");
+        UUID uUID = player.getUniqueId();
+        if (this.joined.contains(uUID)) {
+            this.joined.remove(uUID);
+            this.joinOrder.remove(uUID);
+            this.players.remove(uUID);
+            this.eliminated.remove(uUID);
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5df2\u9000\u51fa\u62a5\u540d\u3002");
         } else {
-            joined.add(u);
-            joinOrder.add(u);
-            players.add(u);
-            eliminated.remove(u);
-            p.sendMessage(plugin.msg("prefix") + "§a报名成功! 当前报名人数: §e" + joined.size()
-                    + "§a, 等管理员开始对局 (模式: " + modeDisplay() + ")");
-            playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
+            this.joined.add(uUID);
+            this.joinOrder.add(uUID);
+            this.players.add(uUID);
+            this.eliminated.remove(uUID);
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u62a5\u540d\u6210\u529f! \u5f53\u524d\u62a5\u540d\u4eba\u6570: \u00a7e" + this.joined.size() + "\u00a7a, \u7b49\u7ba1\u7406\u5458\u5f00\u59cb\u5bf9\u5c40 (\u6a21\u5f0f: " + this.modeDisplay() + ")");
+            this.playSound(player, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
         }
     }
 
-    /** 无条件加入报名 (用于接受邀请/强制加入); @return 是否成功 */
-    public boolean join(Player p) {
-        if (state == State.RUNNING || state == State.ENDING) {
-            p.sendMessage(plugin.msg("prefix") + "§c对局正在进行中, 无法加入。");
+    public boolean join(Player player) {
+        if (this.state == State.RUNNING || this.state == State.ENDING) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5bf9\u5c40\u6b63\u5728\u8fdb\u884c\u4e2d, \u65e0\u6cd5\u52a0\u5165\u3002");
             return false;
         }
-        UUID u = p.getUniqueId();
-        if (joined.contains(u)) return true;
-        joined.add(u);
-        joinOrder.add(u);
-        players.add(u);
-        eliminated.remove(u);
-        p.sendMessage(plugin.msg("prefix") + "§a已加入房间 §e" + roomId + " §a报名! 当前报名人数: §e"
-                + joined.size() + "§a, 等管理员开始 (模式: " + modeDisplay() + ")");
-        playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
+        UUID uUID = player.getUniqueId();
+        if (this.joined.contains(uUID)) {
+            return true;
+        }
+        this.joined.add(uUID);
+        this.joinOrder.add(uUID);
+        this.players.add(uUID);
+        this.eliminated.remove(uUID);
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u52a0\u5165\u623f\u95f4 \u00a7e" + this.roomId + " \u00a7a\u62a5\u540d! \u5f53\u524d\u62a5\u540d\u4eba\u6570: \u00a7e" + this.joined.size() + "\u00a7a, \u7b49\u7ba1\u7406\u5458\u5f00\u59cb (\u6a21\u5f0f: " + this.modeDisplay() + ")");
+        this.playSound(player, Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.6f);
         return true;
     }
 
-    /** 退出报名 (接受邀请/自由退出), 若非报名成员返回 false */
-    public boolean leave(Player p) {
-        UUID u = p.getUniqueId();
-        if (!joined.contains(u)) return false;
-        joined.remove(u);
-        joinOrder.remove(u);
-        players.remove(u);
-        eliminated.remove(u);
-        p.sendMessage(plugin.msg("prefix") + "§c已退出房间 §e" + roomId + " §c报名。");
+    public boolean leave(Player player) {
+        UUID uUID = player.getUniqueId();
+        if (!this.joined.contains(uUID)) {
+            return false;
+        }
+        this.joined.remove(uUID);
+        this.joinOrder.remove(uUID);
+        this.players.remove(uUID);
+        this.eliminated.remove(uUID);
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5df2\u9000\u51fa\u623f\u95f4 \u00a7e" + this.roomId + " \u00a7c\u62a5\u540d\u3002");
         return true;
     }
 
-    /** 房间创建者 */
-    public UUID owner() { return owner; }
-    public void setOwner(UUID owner) { this.owner = owner; }
-    public boolean isOwner(UUID u) { return owner != null && owner.equals(u); }
+    public UUID owner() {
+        return this.owner;
+    }
 
-    // ==================== 开始 / 停止 ====================
+    public void setOwner(UUID uUID) {
+        this.owner = uUID;
+    }
 
-    public void startGame(org.bukkit.command.CommandSender sender, Mode m) {
-        if (state == State.COUNTDOWN || state == State.RUNNING) {
-            sender.sendMessage(plugin.msg("prefix") + "§c已有对局在进行中 (" + stateDisplay() + ")");
+    public boolean isOwner(UUID uUID) {
+        return this.owner != null && this.owner.equals(uUID);
+    }
+
+    public void startGame(CommandSender commandSender, Mode mode) {
+        if (this.state == State.COUNTDOWN || this.state == State.RUNNING) {
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5df2\u6709\u5bf9\u5c40\u5728\u8fdb\u884c\u4e2d (" + this.stateDisplay() + ")");
             return;
         }
-        this.mode = m;
-        if (joined.isEmpty()) {
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                joined.add(p.getUniqueId());
-                joinOrder.add(p.getUniqueId());
+        this.mode = mode;
+        if (this.joined.isEmpty()) {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                this.joined.add(player.getUniqueId());
+                this.joinOrder.add(player.getUniqueId());
             }
         }
-        players.clear();
-        players.addAll(joined);
-        eliminated.clear();
-        teams.clear();
-        myScoreboard().resetStats();
-
-        // 单人模式: 管理元可开 (不限人数); 对战/组队需至少 2 人
-        int minPlayers = Math.max(2, plugin.getConfig().getInt("game.min-players", 2));
-        if (players.size() < 1) {
-            sender.sendMessage(plugin.msg("prefix") + "§c参战人数不足, 请先 /box game join 报名。");
-            joined.clear();
-            joinOrder.clear();
-            players.clear();
+        this.players.clear();
+        this.players.addAll(this.joined);
+        this.eliminated.clear();
+        this.teams.clear();
+        this.myScoreboard().resetStats();
+        int n = Math.max(2, this.plugin.getConfig().getInt("game.min-players", 2));
+        if (this.players.size() < 1) {
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u53c2\u6218\u4eba\u6570\u4e0d\u8db3, \u8bf7\u5148 /box game join \u62a5\u540d\u3002");
+            this.joined.clear();
+            this.joinOrder.clear();
+            this.players.clear();
             return;
         }
-        if (mode != Mode.SOLO && players.size() < minPlayers) {
-            sender.sendMessage(plugin.msg("prefix") + "§c参战人数不足 (" + players.size() + "/" + minPlayers
-                    + "), 对战/组队模式至少需 2 人。");
-            joined.clear();
-            joinOrder.clear();
-            players.clear();
+        if (this.mode != Mode.SOLO && this.players.size() < n) {
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u53c2\u6218\u4eba\u6570\u4e0d\u8db3 (" + this.players.size() + "/" + n + "), \u5bf9\u6218/\u7ec4\u961f\u6a21\u5f0f\u81f3\u5c11\u9700 2 \u4eba\u3002");
+            this.joined.clear();
+            this.joinOrder.clear();
+            this.players.clear();
             return;
         }
-        if (mode == Mode.TEAM) {
-            int teamCount = Math.max(2, plugin.getConfig().getInt("game.team-count", 2));
-            int i = 0;
-            for (UUID u : joinOrder) {
-                teams.put(u, i % teamCount);
-                i++;
+        if (this.mode == Mode.TEAM) {
+            int n2 = Math.max(2, this.plugin.getConfig().getInt("game.team-count", 2));
+            int n3 = 0;
+            for (UUID uUID : this.joinOrder) {
+                this.teams.put(uUID, n3 % n2);
+                ++n3;
             }
         }
-        countdownLeft = Math.max(5, plugin.getConfig().getInt("game.countdown-seconds", 30));
-        state = State.COUNTDOWN;
-        currentWinner = null;
-        // 报名玩家传送到世界出生点等待 (对局世界)
-        Bukkit.broadcast(plugin.component("game-start",
-                "{mode}", mode.display, "{count}", String.valueOf(players.size()),
-                "{seconds}", String.valueOf(countdownLeft)));
-        tickTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), 20L, 20L);
-        startScoreboard();
+        this.countdownLeft = Math.max(5, this.plugin.getConfig().getInt("game.countdown-seconds", 30));
+        this.state = State.COUNTDOWN;
+        this.currentWinner = null;
+        Bukkit.broadcast((Component)this.plugin.component("game-start", "{mode}", this.mode.display, "{count}", String.valueOf(this.players.size()), "{seconds}", String.valueOf(this.countdownLeft)));
+        this.tickTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.tick(), 20L, 20L);
+        this.startScoreboard();
     }
 
     private void startScoreboard() {
-        // 计分板启动 (ScoreboardManager.updateAll 每秒钟更新)
-        if (myScoreboard() != null) {
-            myScoreboard().start();
+        if (this.myScoreboard() != null) {
+            this.myScoreboard().start();
         }
     }
 
-    public void stopGame(org.bukkit.command.CommandSender sender) {
-        if (state == State.IDLE) {
-            sender.sendMessage(plugin.msg("prefix") + "§c当前没有进行中的对局。");
+    public void stopGame(CommandSender commandSender) {
+        if (this.state == State.IDLE) {
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5f53\u524d\u6ca1\u6709\u8fdb\u884c\u4e2d\u7684\u5bf9\u5c40\u3002");
             return;
         }
-        sender.sendMessage(plugin.msg("prefix") + "§e管理员终止对局, 正在恢复地形...");
-        finish("管理员终止对局", null, List.of());
+        commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7ba1\u7406\u5458\u7ec8\u6b62\u5bf9\u5c40, \u6b63\u5728\u6062\u590d\u5730\u5f62...");
+        this.finish("\u7ba1\u7406\u5458\u7ec8\u6b62\u5bf9\u5c40", null, List.of());
     }
 
     private void tick() {
-        if (state == State.COUNTDOWN) {
-            if (countdownLeft <= 0) {
-                startRunning();
+        if (this.state == State.COUNTDOWN) {
+            if (this.countdownLeft <= 0) {
+                this.startRunning();
             } else {
-                if (countdownLeft <= 5 || countdownLeft % 5 == 0) {
-                    Bukkit.broadcast(plugin.component("game-countdown", "{seconds}", String.valueOf(countdownLeft)));
-                    // 倒计时报数音效 (全服)
-                    Bukkit.getGlobalRegionScheduler().run(plugin, t ->
-                            Bukkit.getOnlinePlayers().forEach(p ->
-                                    playSound(p, countdownLeft <= 3 ? Sound.BLOCK_NOTE_BLOCK_PLING
-                                            : Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f,
-                                            countdownLeft <= 3 ? 2.0f : 1.0f)));
+                if (this.countdownLeft <= 5 || this.countdownLeft % 5 == 0) {
+                    Bukkit.broadcast((Component)this.plugin.component("game-countdown", "{seconds}", String.valueOf(this.countdownLeft)));
+                    Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> Bukkit.getOnlinePlayers().forEach(player -> this.playSound((Player)player, this.countdownLeft <= 3 ? Sound.BLOCK_NOTE_BLOCK_PLING : Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, this.countdownLeft <= 3 ? 2.0f : 1.0f)));
                 }
-                // 屏幕大屏倒计时 (Title): 5 秒内每秒大屏显示, 其余显示 boss bar 数字
-                if (countdownLeft <= 5) {
-                    final int cd = countdownLeft;
-                    Bukkit.getGlobalRegionScheduler().run(plugin, t ->
-                            Bukkit.getOnlinePlayers().forEach(p -> {
-                                if (players.contains(p.getUniqueId())) {
-                                    myScoreboard().showTitle(p,
-                                            (cd <= 3 ? "§c§l" : "§6§l") + cd,
-                                            "§7对局即将开始");
-                                }
-                            }));
+                if (this.countdownLeft <= 5) {
+                    int n = this.countdownLeft;
+                    Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> Bukkit.getOnlinePlayers().forEach(player -> {
+                        if (this.players.contains(player.getUniqueId())) {
+                            this.myScoreboard().showTitle((Player)player, (n <= 3 ? "\u00a7c\u00a7l" : "\u00a76\u00a7l") + n, "\u00a77\u5bf9\u5c40\u5373\u5c06\u5f00\u59cb");
+                        }
+                    }));
                 }
-                countdownLeft--;
+                --this.countdownLeft;
             }
             return;
         }
-        if (state == State.RUNNING) {
-            // 对局超过10分钟: 自动给每个存活玩家发放一枚追踪器 (只能发一次)
-            maybeGrantTracker();
-            if (mode == Mode.SOLO) {
-                if (System.currentTimeMillis() >= endAt) {
-                    UUID winner = null;
-                    long best = -1;
-                    for (UUID u : players) {
-                        if (eliminated.contains(u)) continue;
-                        long score = plugin.players().getOrCreate(u, null).openedTotal()
-                                + myScoreboard().getKills(u) * 5L;
-                        if (score > best) { best = score; winner = u; }
+        if (this.state == State.RUNNING) {
+            this.maybeGrantTracker();
+            if (this.mode == Mode.SOLO) {
+                if (System.currentTimeMillis() >= this.endAt) {
+                    UUID uUID = null;
+                    long l = -1L;
+                    for (UUID uUID2 : this.players) {
+                        long l2;
+                        if (this.eliminated.contains(uUID2) || (l2 = this.plugin.players().getOrCreate(uUID2, null).openedTotal() + (long)this.myScoreboard().getKills(uUID2) * 5L) <= l) continue;
+                        l = l2;
+                        uUID = uUID2;
                     }
-                    String name = winner != null ? plugin.players().getOrCreate(winner, null).name : "?";
-                    finish("对局时间结束", name + " §e以 §a" + best + " §e分夺冠!", winner != null ? List.of(winner) : List.of());
+                    String uUID3 = uUID != null ? this.plugin.players().getOrCreate(uUID, null).name : "?";
+                    this.finish("\u5bf9\u5c40\u65f6\u95f4\u7ed3\u675f", uUID3 + " \u00a7e\u4ee5 \u00a7a" + l + " \u00a7e\u5206\u593a\u51a0!", uUID != null ? List.of(uUID) : List.of());
                 }
             } else {
-                // 所有对战模式共享: 时间到 (若配置了 timeout) 则提前结算; 否则按淘汰制
-                if (System.currentTimeMillis() >= endAt && !plugin.getConfig().getBoolean("game.no-timeout", false)) {
-                    // 时间到: 存活多人时按击杀数选冠军
-                    UUID winner = null; int bestKills = -1;
-                    for (UUID u : players) {
-                        if (eliminated.contains(u)) continue;
-                        int k = myScoreboard().getKills(u);
-                        if (k > bestKills) { bestKills = k; winner = u; }
+                if (System.currentTimeMillis() >= this.endAt && !this.plugin.getConfig().getBoolean("game.no-timeout", false)) {
+                    UUID uUID = null;
+                    int n = -1;
+                    for (UUID object : this.players) {
+                        int n2;
+                        if (this.eliminated.contains(object) || (n2 = this.myScoreboard().getKills(object)) <= n) continue;
+                        n = n2;
+                        uUID = object;
                     }
-                    String name = winner != null ? plugin.players().getOrCreate(winner, null).name : "?";
-                    finish("对局时间结束", name + " §e以 §a" + bestKills + " §e击杀夺冠!", winner != null ? List.of(winner) : List.of());
+                    String uUID4 = uUID != null ? this.plugin.players().getOrCreate(uUID, null).name : "?";
+                    this.finish("\u5bf9\u5c40\u65f6\u95f4\u7ed3\u675f", (String)uUID4 + " \u00a7e\u4ee5 \u00a7a" + n + " \u00a7e\u51fb\u6740\u593a\u51a0!", uUID != null ? List.of(uUID) : List.of());
                     return;
                 }
-                if (mode == Mode.TEAM) {
-                    var aliveTeams = aliveTeams();
-                    if (aliveTeams.size() <= 1) {
-                        List<UUID> winners = new ArrayList<>();
-                        for (UUID u : players) {
-                            if (!eliminated.contains(u)) winners.add(u);
+                if (this.mode == Mode.TEAM) {
+                    Set<Integer> set = this.aliveTeams();
+                    if (set.size() <= 1) {
+                        ArrayList<UUID> arrayList = new ArrayList<UUID>();
+                        for (UUID uUID : this.players) {
+                            if (this.eliminated.contains(uUID)) continue;
+                            arrayList.add(uUID);
                         }
-                        StringBuilder names = new StringBuilder();
-                        for (UUID u : winners) {
-                            if (names.length() > 0) names.append("§7、");
-                            names.append("§a").append(plugin.players().getOrCreate(u, null).name);
+                        StringBuilder stringBuilder = new StringBuilder();
+                        for (UUID uUID : arrayList) {
+                            if (stringBuilder.length() > 0) {
+                                stringBuilder.append("\u00a77\u3001");
+                            }
+                            stringBuilder.append("\u00a7a").append(this.plugin.players().getOrCreate((UUID)uUID, null).name);
                         }
-                        finish("队伍对决结束", names + " §e所在的队伍获胜!", winners);
+                        this.finish("\u961f\u4f0d\u5bf9\u51b3\u7ed3\u675f", String.valueOf(stringBuilder) + " \u00a7e\u6240\u5728\u7684\u961f\u4f0d\u83b7\u80dc!", arrayList);
                     }
-                } else {
-                    // 仅剩1人 → 自动结束并送回大厅
-                    if (aliveCount() <= 1) {
-                        UUID winner = null;
-                        for (UUID u : players) {
-                            if (!eliminated.contains(u)) { winner = u; break; }
-                        }
-                        String name = winner != null ? plugin.players().getOrCreate(winner, null).name : "?";
-                        finish("对战结束", name + " §e是最后的幸存者!", winner != null ? List.of(winner) : List.of());
+                } else if (this.aliveCount() <= 1) {
+                    UUID uUID = null;
+                    for (UUID uUID3 : this.players) {
+                        if (this.eliminated.contains(uUID3)) continue;
+                        uUID = uUID3;
+                        break;
                     }
+                    String string = uUID != null ? this.plugin.players().getOrCreate(uUID, null).name : "?";
+                    this.finish("\u5bf9\u6218\u7ed3\u675f", (String)string + " \u00a7e\u662f\u6700\u540e\u7684\u5e78\u5b58\u8005!", uUID != null ? List.of(uUID) : List.of());
                 }
             }
         }
     }
 
-    /** 对局超过指定分钟(默认10)自动给每个存活玩家发放追踪器 (只发一次), 促进追击 */
     private void maybeGrantTracker() {
-        if (trackerGiven) return;
-        long grantAfterMs = Math.max(1, plugin.getConfig().getLong("game.tracker-grant-minutes", 10)) * 60_000L;
-        long elapsed = System.currentTimeMillis() - startAt;
-        if (elapsed < grantAfterMs) return;
-        trackerGiven = true;
-        if (plugin.specialItems() == null) return;
-        for (UUID u : players) {
-            if (eliminated.contains(u)) continue;
-            Player p = Bukkit.getPlayer(u);
-            if (p == null || !p.isOnline()) continue;
-            // 给存活玩家背包加一枚追踪罗盘 (enemy_tracker)
-            p.getScheduler().run(plugin, task -> {
+        if (this.trackerGiven) {
+            return;
+        }
+        long l = Math.max(1L, this.plugin.getConfig().getLong("game.tracker-grant-minutes", 10L)) * 60000L;
+        long l2 = System.currentTimeMillis() - this.startAt;
+        if (l2 < l) {
+            return;
+        }
+        this.trackerGiven = true;
+        if (this.plugin.specialItems() == null) {
+            return;
+        }
+        for (UUID uUID : this.players) {
+            Player player;
+            if (this.eliminated.contains(uUID) || (player = Bukkit.getPlayer((UUID)uUID)) == null || !player.isOnline()) continue;
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
                 try {
-                    var it = plugin.specialItems().buildItem("enemy_tracker");
-                    if (it != null) {
-                        p.getInventory().addItem(it);
-                        p.sendMessage(plugin.msg("prefix")
-                                + "§e对局已进行 §a" + (grantAfterMs / 60_000L) + " §e分钟! §f发放 §a追踪罗盘 §f×1, "
-                                + "右键锁定一名敌人以追缉其方位!");
-                        p.playSound(p.getLocation(), Sound.ITEM_TRIDENT_RETURN, 1.0f, 1.6f);
+                    ItemStack itemStack = this.plugin.specialItems().buildItem("enemy_tracker");
+                    if (itemStack != null) {
+                        player.getInventory().addItem(new ItemStack[]{itemStack});
+                        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u5bf9\u5c40\u5df2\u8fdb\u884c \u00a7a" + l / 60000L + " \u00a7e\u5206\u949f! \u00a7f\u53d1\u653e \u00a7a\u8ffd\u8e2a\u7f57\u76d8 \u00a7f\u00d71, \u53f3\u952e\u9501\u5b9a\u4e00\u540d\u654c\u4eba\u4ee5\u8ffd\u7f09\u5176\u65b9\u4f4d!");
+                        player.playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 1.0f, 1.6f);
                     }
-                } catch (Throwable ignored) {}
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
             }, () -> {});
         }
-        Bukkit.broadcast(plugin.component("game-tracker-grant",
-                "{minutes}", String.valueOf(grantAfterMs / 60_000L)));
+        Bukkit.broadcast((Component)this.plugin.component("game-tracker-grant", "{minutes}", String.valueOf(l / 60000L)));
     }
 
     private void startRunning() {
-        state = State.RUNNING;
-        long durationMs = Math.max(1, plugin.getConfig().getLong("game.duration-minutes", 30)) * 60_000L;
-        endAt = System.currentTimeMillis() + durationMs;
-        startAt = System.currentTimeMillis();
-        trackerGiven = false;
-        World w = roomWorld();
-        if (w != null) {
-            w.setPVP(mode != Mode.SOLO);
+        this.state = State.RUNNING;
+        long l = Math.max(1L, this.plugin.getConfig().getLong("game.duration-minutes", 30L)) * 60000L;
+        this.endAt = System.currentTimeMillis() + l;
+        this.startAt = System.currentTimeMillis();
+        this.trackerGiven = false;
+        World world = this.roomWorld();
+        if (world != null) {
+            world.setPVP(this.mode != Mode.SOLO);
         }
-        // 启动毒圈 (缩圈机制, 吃鸡核心玩法; SOLO 时间制不启用)
-        if (mode != Mode.SOLO) storm.start();
-        final List<UUID> order = new ArrayList<>(players);
-        for (int i = 0; i < order.size(); i++) {
-            UUID u = order.get(i);
-            Player p = Bukkit.getPlayer(u);
-            if (p != null && p.isOnline()) {
-                // 对局开始玩家分散到地图各处随机出生点 (吃鸡落地, 搭配遮挡地形)
-                plugin.spawns().randomLand(l -> p.teleportAsync(l), () -> {});
-                // 清除对局玩家状态: 满血/满饱/清效果/生存模式 + 清空背包 (吃鸡从零开始, 公平)
-                p.getScheduler().run(plugin, task -> {
-                    try { p.getInventory().clear(); } catch (Throwable ignored) {}
-                    p.setHealth(20.0);
-                    p.setFoodLevel(20);
-                    p.setSaturation(10f);
-                    p.clearActivePotionEffects();
-                    if (p.getGameMode() != GameMode.SURVIVAL) p.setGameMode(GameMode.SURVIVAL);
-                }, () -> {});
+        if (this.mode != Mode.SOLO) {
+            this.storm.start();
+        }
+        ArrayList<UUID> arrayList = new ArrayList<UUID>(this.players);
+        for (int i = 0; i < arrayList.size(); ++i) {
+            UUID uUID = (UUID)arrayList.get(i);
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            if (player == null || !player.isOnline()) continue;
+            this.plugin.spawns().randomLand(location -> player.teleportAsync(location), () -> {});
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    player.getInventory().clear();
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                player.setHealth(20.0);
+                player.setFoodLevel(20);
+                player.setSaturation(10.0f);
+                player.clearActivePotionEffects();
+                if (player.getGameMode() != GameMode.SURVIVAL) {
+                    player.setGameMode(GameMode.SURVIVAL);
+                }
+            }, () -> {});
+        }
+        this.myScoreboard().start();
+        Bukkit.broadcast((Component)this.plugin.component("game-running", "{mode}", this.mode.display, "{minutes}", String.valueOf(this.plugin.getConfig().getLong("game.duration-minutes", 30L))));
+        Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> Bukkit.getOnlinePlayers().forEach(player -> {
+            this.playSound((Player)player, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
+            if (this.players.contains(player.getUniqueId())) {
+                player.getScheduler().runDelayed((Plugin)this.plugin, scheduledTask -> this.playSound((Player)player, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.9f, 1.6f), () -> {}, 10L);
             }
+        }));
+    }
+
+    public void onPlayerDeath(Player player, Player player2) {
+        if (this.state != State.RUNNING) {
+            return;
         }
-        myScoreboard().start();
-        Bukkit.broadcast(plugin.component("game-running", "{mode}", mode.display,
-                "{minutes}", String.valueOf(plugin.getConfig().getLong("game.duration-minutes", 30))));
-        // 对局开始音效: 全服大气音 + 参战者升级音
-        Bukkit.getGlobalRegionScheduler().run(plugin, t ->
-                Bukkit.getOnlinePlayers().forEach(p -> {
-                    playSound(p, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
-                    if (players.contains(p.getUniqueId())) {
-                        p.getScheduler().runDelayed(plugin, task ->
-                                playSound(p, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.9f, 1.6f),
-                                () -> {}, 10L);
-                    }
-                }));
-    }
-
-    // ==================== 死亡 / 淘汰 ====================
-
-    /** 玩家死亡 (玩家区域线程): PVP/TEAM 淘汰制; 记录击杀; 淘汰可回大厅或旁观 */
-    public void onPlayerDeath(Player victim, Player killer) {
-        if (state != State.RUNNING) return;
-        UUID u = victim.getUniqueId();
-
-        // 如果已淘汰则不重复处理
-        if (eliminated.contains(u)) return;
-
-        // 记录击杀数 (如果有击杀者且仍在游戏中)
-        if (killer != null && killer != victim && players.contains(killer.getUniqueId())
-                && !eliminated.contains(killer.getUniqueId())) {
-            myScoreboard().recordKill(killer.getUniqueId());
+        UUID uUID = player.getUniqueId();
+        if (this.eliminated.contains(uUID)) {
+            return;
         }
-        // 记录死亡数
-        myScoreboard().recordDeath(u);
-
-        if (!players.contains(u)) return;
-        if (mode == Mode.SOLO) return; // 单人模式不淘汰
-
-        // 标记为淘汰
-        eliminated.add(u);
-        myScoreboard().clearPlayer(u);
-        Bukkit.broadcast(plugin.component("game-eliminated", "{player}", victim.getName(),
-                "{alive}", String.valueOf(aliveCount())));
-        // 淘汰音效: 受害者受伤音 + 全服低沉提示
-        victim.getScheduler().run(plugin, task -> playSound(victim, Sound.ENTITY_PLAYER_HURT, 1.0f, 0.8f), () -> {});
-        broadcastSound(Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.6f);
-    }
-
-    /** PvP 伤害检查 (区域线程): SOLO 禁玩家互伤; TEAM 同队免伤; 淘汰玩家不能伤害他人 */
-    public boolean canDamage(Player damager, Player victim) {
-        if (mode == Mode.SOLO) return false;
-        // 淘汰玩家不能伤害他人
-        if (eliminated.contains(damager.getUniqueId())) return false;
-        // 被伤害者必须是存活玩家
-        if (eliminated.contains(victim.getUniqueId())) return false;
-        if (mode == Mode.TEAM) {
-            Integer a = teams.get(damager.getUniqueId());
-            Integer b = teams.get(victim.getUniqueId());
-            if (a != null && a.equals(b)) return false;
+        if (player2 != null && player2 != player && this.players.contains(player2.getUniqueId()) && !this.eliminated.contains(player2.getUniqueId())) {
+            this.myScoreboard().recordKill(player2.getUniqueId());
         }
-        return true;
-    }
-
-    /** 淘汰玩家: 提供回大厅 / 旁观选择 (被淘汰区域线程) */
-    private void offerSpectateOrLobby(Player p) {
-        if (!p.isOnline()) return;
-        // 已满血并进入旁观, 不再需要此方法
-    }
-
-    /** 传送玩家到大厅 */
-    public void sendToLobby(Player p) {
-        World lobby = plugin.worlds().lobby();
-        if (lobby != null) {
-            // 加入大厅: 自动清理背包数据 (对局搜刮的战利品不带出)
-            p.getScheduler().run(plugin, task -> {
-                try { p.getInventory().clear(); } catch (Throwable ignored) {}
-            }, () -> {});
-            p.teleportAsync(plugin.lobbyBuilder().spawnLocation());
-            p.getScheduler().run(plugin, task -> {
-                if (p.getGameMode() != GameMode.SURVIVAL) p.setGameMode(GameMode.SURVIVAL);
-                p.setHealth(20.0);
-                p.setFoodLevel(20);
-                p.clearActivePotionEffects();
-            }, () -> {});
+        this.myScoreboard().recordDeath(uUID);
+        if (!this.players.contains(uUID)) {
+            return;
         }
-    }
-
-    /** 玩家当前是否允许主动返回大厅 (对局进行中且是参战未淘汰玩家 → 禁止) */
-    public boolean canLeaveToLobby(Player p) {
-        if (state == State.RUNNING || state == State.COUNTDOWN) {
-            // 参战且未淘汰玩家禁止主动回大厅 (防逃跑); 淘汰/旁观/非参战允许
-            if (isInGame(p.getUniqueId())) return false;
+        if (this.mode == Mode.SOLO) {
+            return;
         }
-        return true;
+        this.eliminated.add(uUID);
+        this.myScoreboard().clearPlayer(uUID);
+        Bukkit.broadcast((Component)this.plugin.component("game-eliminated", "{player}", player.getName(), "{alive}", String.valueOf(this.aliveCount())));
+        player.getScheduler().run((Plugin)this.plugin, scheduledTask -> this.playSound(player, Sound.ENTITY_PLAYER_HURT, 1.0f, 0.8f), () -> {});
+        this.broadcastSound(Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.6f);
     }
 
-    /**
-     * 主动返回大厅 (命令/GUI 用): 若对局中且参战未淘汰则阻止并提示, 否则传送
-     * @return true 表示已执行传送, false 表示被阻止
-     */
-    public boolean requestReturnToLobby(Player p) {
-        if (!canLeaveToLobby(p)) {
-            p.sendMessage(plugin.msg("prefix")
-                    + "§c对局进行中, 不能返回大厅! " + (mode == Mode.SOLO
-                    ? "" : "§7(被淘汰后可用 §e/box lobby §7回大厅)"));
+    public boolean canDamage(Player player, Player player2) {
+        if (this.mode == Mode.SOLO) {
             return false;
         }
-        sendToLobby(p);
+        if (this.eliminated.contains(player.getUniqueId())) {
+            return false;
+        }
+        if (this.eliminated.contains(player2.getUniqueId())) {
+            return false;
+        }
+        if (this.mode == Mode.TEAM) {
+            Integer n = this.teams.get(player.getUniqueId());
+            Integer n2 = this.teams.get(player2.getUniqueId());
+            if (n != null && n.equals(n2)) {
+                return false;
+            }
+        }
         return true;
     }
 
-    /** 观战: 设为旁观模式, 继续观战 (被淘汰区域线程) */
-    public void spectate(Player p) {
-        World w = roomWorld();
-        if (w != null && state == State.RUNNING) {
-            p.getScheduler().run(plugin, task -> {
-                if (p.getGameMode() != GameMode.SPECTATOR) p.setGameMode(GameMode.SPECTATOR);
+    private void offerSpectateOrLobby(Player player) {
+        if (!player.isOnline()) {
+            return;
+        }
+    }
+
+    public void sendToLobby(Player player) {
+        World world = this.plugin.worlds().lobby();
+        if (world != null) {
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    player.getInventory().clear();
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }, () -> {});
+            player.teleportAsync(this.plugin.lobbyBuilder().spawnLocation());
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                if (player.getGameMode() != GameMode.SURVIVAL) {
+                    player.setGameMode(GameMode.SURVIVAL);
+                }
+                player.setHealth(20.0);
+                player.setFoodLevel(20);
+                player.clearActivePotionEffects();
             }, () -> {});
         }
     }
 
-    /** 玩家死亡重生后: 若已淘汰则自动进入旁观 (留在死亡位置附近观战, 不送大厅) */
-    public void autoSpectateAfterDeath(Player p) {
-        // 已在 onDeath 中直接切换到旁观, 此方法保留但不再需要
+    public boolean canLeaveToLobby(Player player) {
+        return this.state != State.RUNNING && this.state != State.COUNTDOWN || !this.isInGame(player.getUniqueId());
+    }
+
+    public boolean requestReturnToLobby(Player player) {
+        if (!this.canLeaveToLobby(player)) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5bf9\u5c40\u8fdb\u884c\u4e2d, \u4e0d\u80fd\u8fd4\u56de\u5927\u5385! " + (this.mode == Mode.SOLO ? "" : "\u00a77(\u88ab\u6dd8\u6c70\u540e\u53ef\u7528 \u00a7e/box lobby \u00a77\u56de\u5927\u5385)"));
+            return false;
+        }
+        this.sendToLobby(player);
+        return true;
+    }
+
+    public void spectate(Player player) {
+        World world = this.roomWorld();
+        if (world != null && this.state == State.RUNNING) {
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                if (player.getGameMode() != GameMode.SPECTATOR) {
+                    player.setGameMode(GameMode.SPECTATOR);
+                }
+            }, () -> {});
+        }
+    }
+
+    public void autoSpectateAfterDeath(Player player) {
     }
 
     private World mainWorld() {
-        World lobby = plugin.worlds().lobby();
-        if (lobby != null) return lobby;
-        World arena = roomWorld();
-        if (arena != null) return arena;
-        return Bukkit.getWorlds().isEmpty() ? null : Bukkit.getWorlds().get(0);
+        World world = this.plugin.worlds().lobby();
+        if (world != null) {
+            return world;
+        }
+        World world2 = this.roomWorld();
+        if (world2 != null) {
+            return world2;
+        }
+        return Bukkit.getWorlds().isEmpty() ? null : (World)Bukkit.getWorlds().get(0);
     }
 
-    // ==================== 结算与自动恢复地形 ====================
-
-    private void finish(String reason, String winnerText, List<UUID> winners) {
-        if (state == State.IDLE) return;
-        state = State.ENDING;
-        currentWinner = winnerText;
-        if (tickTask != null) { tickTask.cancel(); tickTask = null; }
-        storm.stop(); // 结束对局, 停止毒圈
-        // 清除所有玩家追踪状态 (对局结束)
-        if (plugin.specialItems() != null) {
-            Bukkit.getGlobalRegionScheduler().run(plugin, t ->
-                    plugin.specialItems().trackingPlayers().forEach(u -> plugin.specialItems().stopTracking(u)));
+    private void finish(String string, String string2, List<UUID> list) {
+        Player player;
+        Player player2;
+        if (this.state == State.IDLE) {
+            return;
         }
-        double reward = plugin.getConfig().getDouble("game.win-reward", 1000.0);
-        StringBuilder sb = new StringBuilder();
-        sb.append(plugin.raw("game-end")).append(" §7[").append(mode.color).append(mode.display).append("§7] ")
-                .append("§f").append(reason).append(" §7胜者: ").append(winnerText != null ? winnerText : "无");
-        Bukkit.broadcast(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
-                .legacyAmpersand().deserialize(sb.toString()));
-        // 对局结束音效: 全服号角 + 胜者专属
-        broadcastSound(Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 0.7f);
-        for (UUID u : winners) {
-            Player wp = Bukkit.getPlayer(u);
-            if (wp != null && wp.isOnline()) {
-                wp.getScheduler().run(plugin, task ->
-                        playSound(wp, Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 2.0f), () -> {});
+        this.state = State.ENDING;
+        this.currentWinner = string2;
+        if (this.tickTask != null) {
+            this.tickTask.cancel();
+            this.tickTask = null;
+        }
+        this.storm.stop();
+        if (this.plugin.specialItems() != null) {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> this.plugin.specialItems().trackingPlayers().forEach(uUID -> this.plugin.specialItems().stopTracking((UUID)uUID)));
+        }
+        double d = this.plugin.getConfig().getDouble("game.win-reward", 1000.0);
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append(this.plugin.raw("game-end")).append(" \u00a77[").append(this.mode.color).append(this.mode.display).append("\u00a77] ").append("\u00a7f").append(string).append(" \u00a77\u80dc\u8005: ").append(string2 != null ? string2 : "\u65e0");
+        Bukkit.broadcast((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(stringBuilder.toString()));
+        this.broadcastSound(Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 0.7f);
+        for (UUID uUID : list) {
+            player2 = Bukkit.getPlayer((UUID)uUID);
+            if (player2 == null || !player2.isOnline()) continue;
+            player2.getScheduler().run((Plugin)this.plugin, scheduledTask -> this.playSound(player2, Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 2.0f), () -> {});
+        }
+        if (d > 0.0) {
+            for (UUID uUID : list) {
+                player2 = Bukkit.getOfflinePlayer((UUID)uUID);
+                this.plugin.econ().deposit((OfflinePlayer)player2, d);
+                player = player2.getPlayer();
+                if (player == null || !player.isOnline()) continue;
+                player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u83b7\u80dc\u5956\u52b1 \u00a7e" + (long)d + " \u00a7a\u5143\u5df2\u53d1\u653e!");
             }
         }
-        if (reward > 0) {
-            for (UUID u : winners) {
-                org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(u);
-                plugin.econ().deposit(op, reward);
-                Player online = op.getPlayer();
-                if (online != null && online.isOnline()) {
-                    online.sendMessage(plugin.msg("prefix") + "§a获胜奖励 §e" + (long) reward + " §a元已发放!");
+        for (UUID uUID : this.players) {
+            player2 = Bukkit.getPlayer((UUID)uUID);
+            if (player2 == null || !player2.isOnline()) continue;
+            player = player2;
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    player.getInventory().clear();
                 }
-            }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }, () -> {});
+            this.sendToLobby(player);
         }
-        // 自动: 把剩余存活玩家送回大厅 (对战结束所有参战者回大厅) + 清空背包
-        for (UUID u : players) {
-            Player p = Bukkit.getPlayer(u);
-            if (p != null && p.isOnline()) {
-                final Player fp = p;
-                fp.getScheduler().run(plugin, task -> {
-                    try { fp.getInventory().clear(); } catch (Throwable ignored) {}
-                }, () -> {});
-                sendToLobby(fp);
-            }
-        }
-        // 自动恢复地形 (Global 线程)
-        Bukkit.getGlobalRegionScheduler().run(plugin, t -> resetWorld());
+        Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> this.resetWorld());
     }
 
-    /** 自动重置: 箱子清空重投 + 建筑重建 + 掉落清理 (Global 线程) */
     private void resetWorld() {
-        storm.stop(); // 重置前确保毒圈停止
-        World w = roomWorld();
-        if (w != null) {
-            w.setPVP(false);
-            // 清空所有实体(非玩家): 掉落物/子弹/TNT/建筑实体等, 防止残留
-            for (org.bukkit.entity.Entity e : w.getEntities()) {
-                if (e instanceof Player) continue;
-                e.getScheduler().run(plugin, task -> {
-                    try { e.remove(); } catch (Throwable ignored) {}
+        this.storm.stop();
+        World world = this.roomWorld();
+        if (world != null) {
+            world.setPVP(false);
+            for (Entity entity : world.getEntities()) {
+                if (entity instanceof Player) continue;
+                entity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                    try {
+                        entity.remove();
+                    }
+                    catch (Throwable throwable) {
+                        // empty catch block
+                    }
                 }, () -> {});
             }
         }
-        plugin.boxes().wipeAll(() -> {
-            int initial = plugin.boxInitialFill();
-            for (int i = 0; i < initial; i++) {
-                plugin.boxes().spawnRandomBox(plugin.weightedPickForWorld(), false, null);
+        this.plugin.boxes().wipeAll(() -> {
+            int n = this.plugin.boxInitialFill();
+            for (int i = 0; i < n; ++i) {
+                this.plugin.boxes().spawnRandomBox(this.plugin.weightedPickForWorld(), false, null);
             }
-            plugin.spawnArea().build(null);
-            // 重建大型物资建筑
-            plugin.bigBox().buildRandom(w);
-            // 参战玩家复位: 清空背包 + 满血/满饱/清效果/生存模式 (已送大厅)
-            for (UUID u : players) {
-                Player p = Bukkit.getPlayer(u);
-                if (p != null && p.isOnline()) {
-                    p.getScheduler().run(plugin, task -> {
-                        try { p.getInventory().clear(); } catch (Throwable ignored) {}
-                        p.setHealth(20.0);
-                        p.setFoodLevel(20);
-                        p.setSaturation(10f);
-                        p.clearActivePotionEffects();
-                        if (p.getGameMode() != GameMode.SURVIVAL) p.setGameMode(GameMode.SURVIVAL);
-                    }, () -> {});
-                }
+            this.plugin.spawnArea().build(null);
+            this.plugin.bigBox().buildRandom(world);
+            for (UUID uUID : this.players) {
+                Player player = Bukkit.getPlayer((UUID)uUID);
+                if (player == null || !player.isOnline()) continue;
+                player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                    try {
+                        player.getInventory().clear();
+                    }
+                    catch (Throwable throwable) {
+                        // empty catch block
+                    }
+                    player.setHealth(20.0);
+                    player.setFoodLevel(20);
+                    player.setSaturation(10.0f);
+                    player.clearActivePotionEffects();
+                    if (player.getGameMode() != GameMode.SURVIVAL) {
+                        player.setGameMode(GameMode.SURVIVAL);
+                    }
+                }, () -> {});
             }
-            players.clear();
-            joined.clear();
-            joinOrder.clear();
-            eliminated.clear();
-            teams.clear();
-            trackerGiven = false;
-            myScoreboard().clearAll();
-            state = State.IDLE;
-            currentWinner = null;
-            Bukkit.broadcast(plugin.component("game-reset"));
+            this.players.clear();
+            this.joined.clear();
+            this.joinOrder.clear();
+            this.eliminated.clear();
+            this.teams.clear();
+            this.trackerGiven = false;
+            this.myScoreboard().clearAll();
+            this.state = State.IDLE;
+            this.currentWinner = null;
+            Bukkit.broadcast((Component)this.plugin.component("game-reset", new String[0]));
         });
     }
 
-    public void onPlayerQuit(UUID u) {
-        if (state == State.RUNNING && players.contains(u) && mode != Mode.SOLO) {
-            if (eliminated.add(u)) {
-                Player p = Bukkit.getPlayer(u);
-                myScoreboard().clearPlayer(u);
-                Bukkit.broadcast(plugin.component("game-eliminated",
-                        "{player}", p != null ? p.getName() : "?",
-                        "{alive}", String.valueOf(aliveCount())));
+    public void onPlayerQuit(UUID uUID) {
+        if (this.state == State.RUNNING && this.players.contains(uUID) && this.mode != Mode.SOLO && this.eliminated.add(uUID)) {
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            this.myScoreboard().clearPlayer(uUID);
+            Bukkit.broadcast((Component)this.plugin.component("game-eliminated", "{player}", player != null ? player.getName() : "?", "{alive}", String.valueOf(this.aliveCount())));
+        }
+        this.players.remove(uUID);
+        this.joined.remove(uUID);
+        this.joinOrder.remove(uUID);
+    }
+
+    private void playSound(Player player, Sound sound, float f, float f2) {
+        try {
+            if (player != null && player.isOnline()) {
+                player.playSound(player.getLocation(), sound, f, f2);
             }
         }
-        players.remove(u);
-        joined.remove(u);
-        joinOrder.remove(u);
+        catch (Throwable throwable) {
+            // empty catch block
+        }
     }
 
-    // ==================== 音效工具 ====================
-
-    /** 给单个玩家播放客户端音效 (任意线程安全, Player#playSound 跨线程可调用) */
-    private void playSound(Player p, Sound sound, float vol, float pitch) {
-        try {
-            if (p != null && p.isOnline()) p.playSound(p.getLocation(), sound, vol, pitch);
-        } catch (Throwable ignored) {}
+    private void broadcastSound(Sound sound, float f, float f2) {
+        Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> Bukkit.getOnlinePlayers().forEach(player -> this.playSound((Player)player, sound, f, f2)));
     }
 
-    /** 全服广播音效 (Global 线程调度) */
-    private void broadcastSound(Sound sound, float vol, float pitch) {
-        Bukkit.getGlobalRegionScheduler().run(plugin, t ->
-                Bukkit.getOnlinePlayers().forEach(p -> playSound(p, sound, vol, pitch)));
+    public static enum State {
+        IDLE("\u7a7a\u95f2", "\u00a77"),
+        COUNTDOWN("\u51c6\u5907\u4e2d", "\u00a7e"),
+        RUNNING("\u8fdb\u884c\u4e2d", "\u00a7a"),
+        ENDING("\u7ed3\u7b97\u4e2d", "\u00a7d");
+
+        public final String display;
+        public final String color;
+
+        private State(String string2, String string3) {
+            this.display = string2;
+            this.color = string3;
+        }
+    }
+
+    public static enum Mode {
+        SOLO("\u5355\u4eba\u6a21\u5f0f", "\u00a7a"),
+        PVP("\u73a9\u5bb6\u5bf9\u6218", "\u00a7c"),
+        TEAM("\u7ec4\u961f\u5bf9\u6218", "\u00a76");
+
+        public final String display;
+        public final String color;
+
+        private Mode(String string2, String string3) {
+            this.display = string2;
+            this.color = string3;
+        }
+
+        public static Mode parse(String string) {
+            for (Mode mode : Mode.values()) {
+                if (!mode.name().equalsIgnoreCase(string) && !mode.display.equals(string)) continue;
+                return mode;
+            }
+            return null;
+        }
     }
 }

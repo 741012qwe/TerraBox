@@ -1,145 +1,134 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.TextComponent
+ *  net.kyori.adventure.text.event.ClickEvent
+ *  net.kyori.adventure.text.event.HoverEvent
+ *  net.kyori.adventure.text.event.HoverEventSource
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Sound
+ *  org.bukkit.entity.Player
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Sound;
-import org.bukkit.entity.Player;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.event.ClickEvent;
-import net.kyori.adventure.text.event.HoverEvent;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-
+import com.terrabox.GameManager;
+import com.terrabox.TerraBoxPlugin;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.event.HoverEventSource;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
+import org.bukkit.Sound;
+import org.bukkit.entity.Player;
 
-/**
- * 对局房间邀请系统 —— 房间主人邀请在线玩家加入自己的房间
- *
- * 玩法:
- *  - 房间 owner 通过指令/GUI 邀请在线玩家 → 被邀请者收到可点击文本 "[接受] [拒绝]"
- *  - 点击接受: 执行 /box invite accept → 玩家加入对应房间报名; 拒绝取消
- *  - 邀请 30 秒未处理自动过期; 每玩家同一时刻仅保留一个待处理邀请
- *
- * 线程模型: 邀请由命令/GUI 在玩家区域线程调用; 发送可点击文本安全 (sendMessage 跨线程);
- *   邀请状态用并发 Map 存储; 过期清理惰性(每次邀请时清理已过期)。
- */
 public class InviteManager {
     private final TerraBoxPlugin plugin;
-    private final Map<UUID, Invite> invites = new ConcurrentHashMap<>();
-    private static final long TTL = 30_000L; // 30秒有效期
+    private final Map<UUID, Invite> invites = new ConcurrentHashMap<UUID, Invite>();
+    private static final long TTL = 30000L;
 
-    /** 邀请定义 */
-    private record Invite(UUID owner, UUID target, String roomId, long expires) {}
-
-    public InviteManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public InviteManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    /** 邀请某玩家加入房间 (房间 owner 调用) */
-    public boolean invite(Player owner, Player target, String roomId) {
-        if (owner == null || target == null) return false;
-        if (!plugin.rooms().hasRoom(roomId)) {
-            owner.sendMessage(plugin.msg("prefix") + "§c房间 " + roomId + " 不存在。");
+    public boolean invite(Player player, Player player2, String string) {
+        if (player == null || player2 == null) {
             return false;
         }
-        GameManager rg = plugin.rooms().get(roomId);
-        if (rg != null && rg.owner() != null && !rg.owner().equals(owner.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c你不是房间 §e" + roomId + " §c的房主, 无法邀请。");
+        if (!this.plugin.rooms().hasRoom(string)) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + string + " \u4e0d\u5b58\u5728\u3002");
             return false;
         }
-        if (owner.getUniqueId().equals(target.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c不能邀请自己。");
+        GameManager gameManager = this.plugin.rooms().get(string);
+        if (gameManager != null && gameManager.owner() != null && !gameManager.owner().equals(player.getUniqueId())) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u4f60\u4e0d\u662f\u623f\u95f4 \u00a7e" + string + " \u00a7c\u7684\u623f\u4e3b, \u65e0\u6cd5\u9080\u8bf7\u3002");
             return false;
         }
-        if (target.getUniqueId().equals(owner.getUniqueId())) return false;
-        if (plugin.rooms().isInGame(target.getUniqueId())) {
-            owner.sendMessage(plugin.msg("prefix") + "§c" + target.getName() + " 正在对局中, 无法邀请。");
+        if (player.getUniqueId().equals(player2.getUniqueId())) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u4e0d\u80fd\u9080\u8bf7\u81ea\u5df1\u3002");
             return false;
         }
-        // 清理过期
-        cleanExpired();
-        invites.put(target.getUniqueId(), new Invite(owner.getUniqueId(), target.getUniqueId(), roomId,
-                System.currentTimeMillis() + TTL));
-        // 通知被邀请者 (可点击文本)
-        sendInviteMessage(owner, target, roomId);
-        owner.sendMessage(plugin.msg("prefix") + "§a已邀请 §e" + target.getName() + " §a加入房间 §e"
-                + roomId + "§a, 等待回应...");
-        owner.playSound(owner.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.4f);
+        if (player2.getUniqueId().equals(player.getUniqueId())) {
+            return false;
+        }
+        if (this.plugin.rooms().isInGame(player2.getUniqueId())) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c" + player2.getName() + " \u6b63\u5728\u5bf9\u5c40\u4e2d, \u65e0\u6cd5\u9080\u8bf7\u3002");
+            return false;
+        }
+        this.cleanExpired();
+        this.invites.put(player2.getUniqueId(), new Invite(player.getUniqueId(), player2.getUniqueId(), string, System.currentTimeMillis() + 30000L));
+        this.sendInviteMessage(player, player2, string);
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u9080\u8bf7 \u00a7e" + player2.getName() + " \u00a7a\u52a0\u5165\u623f\u95f4 \u00a7e" + string + "\u00a7a, \u7b49\u5f85\u56de\u5e94...");
+        player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.4f);
         return true;
     }
 
-    /** 发送可点击的邀请文本到被邀请者 */
-    private void sendInviteMessage(Player owner, Player target, String roomId) {
-        String prefix = plugin.msg("prefix");
-        Component msg = LegacyComponentSerializer.legacyAmpersand().deserialize(
-                prefix + "§e" + owner.getName() + " §7邀请你加入对局房间 §b" + roomId + "§7。");
-        Component accept = LegacyComponentSerializer.legacyAmpersand().deserialize("§a[ 接受 ]")
-                .clickEvent(ClickEvent.runCommand("/box invite accept"))
-                .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize("§a点击接受邀请")));
-        Component decline = LegacyComponentSerializer.legacyAmpersand().deserialize("§c[ 拒绝 ]")
-                .clickEvent(ClickEvent.runCommand("/box invite decline"))
-                .hoverEvent(HoverEvent.showText(LegacyComponentSerializer.legacyAmpersand().deserialize("§c点击拒绝邀请")));
-        Component msg2 = LegacyComponentSerializer.legacyAmpersand().deserialize("  ");
-        target.sendMessage(msg.append(msg2).append(accept).append(msg2).append(decline));
-        target.playSound(target.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.5f);
+    private void sendInviteMessage(Player player, Player player2, String string) {
+        String string2 = this.plugin.msg("prefix");
+        TextComponent textComponent = LegacyComponentSerializer.legacyAmpersand().deserialize(string2 + "\u00a7e" + player.getName() + " \u00a77\u9080\u8bf7\u4f60\u52a0\u5165\u5bf9\u5c40\u623f\u95f4 \u00a7b" + string + "\u00a77\u3002");
+        Component component = ((TextComponent)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7a[ \u63a5\u53d7 ]").clickEvent(ClickEvent.runCommand((String)"/box invite accept"))).hoverEvent((HoverEventSource)HoverEvent.showText((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7a\u70b9\u51fb\u63a5\u53d7\u9080\u8bf7")));
+        Component component2 = ((TextComponent)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7c[ \u62d2\u7edd ]").clickEvent(ClickEvent.runCommand((String)"/box invite decline"))).hoverEvent((HoverEventSource)HoverEvent.showText((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7c\u70b9\u51fb\u62d2\u7edd\u9080\u8bf7")));
+        TextComponent textComponent2 = LegacyComponentSerializer.legacyAmpersand().deserialize("  ");
+        player2.sendMessage(textComponent.append((Component)textComponent2).append(component).append((Component)textComponent2).append(component2));
+        player2.playSound(player2.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 0.8f, 1.5f);
     }
 
-    /** 接受最近的有效邀请: 来源房间 + 把玩家加入报名 */
-    public void accept(Player p) {
-        Invite inv = invites.remove(p.getUniqueId());
-        if (inv == null || System.currentTimeMillis() > inv.expires()) {
-            p.sendMessage(plugin.msg("prefix") + "§c当前没有待处理的邀请, 或邀请已过期。");
+    public void accept(Player player) {
+        Player player2;
+        Invite invite = this.invites.remove(player.getUniqueId());
+        if (invite == null || System.currentTimeMillis() > invite.expires()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5f53\u524d\u6ca1\u6709\u5f85\u5904\u7406\u7684\u9080\u8bf7, \u6216\u9080\u8bf7\u5df2\u8fc7\u671f\u3002");
             return;
         }
-        GameManager g = plugin.rooms().get(inv.roomId());
-        if (g == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c邀请的房间已不存在。");
+        GameManager gameManager = this.plugin.rooms().get(invite.roomId());
+        if (gameManager == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u9080\u8bf7\u7684\u623f\u95f4\u5df2\u4e0d\u5b58\u5728\u3002");
             return;
         }
-        if (g.isRunning()) {
-            p.sendMessage(plugin.msg("prefix") + "§c该房间对局已开始, 无法加入。");
+        if (gameManager.isRunning()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u8be5\u623f\u95f4\u5bf9\u5c40\u5df2\u5f00\u59cb, \u65e0\u6cd5\u52a0\u5165\u3002");
             return;
         }
-        if (g.join(p)) {
-            Player owner = Bukkit.getPlayer(inv.owner());
-            if (owner != null && owner.isOnline()) {
-                owner.sendMessage(plugin.msg("prefix") + "§a" + p.getName() + " §a接受了邀请, 已加入房间 §e"
-                        + inv.roomId() + "§a!");
-                owner.playSound(owner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.3f);
-            }
+        if (gameManager.join(player) && (player2 = Bukkit.getPlayer((UUID)invite.owner())) != null && player2.isOnline()) {
+            player2.sendMessage(this.plugin.msg("prefix") + "\u00a7a" + player.getName() + " \u00a7a\u63a5\u53d7\u4e86\u9080\u8bf7, \u5df2\u52a0\u5165\u623f\u95f4 \u00a7e" + invite.roomId() + "\u00a7a!");
+            player2.playSound(player2.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.3f);
         }
     }
 
-    /** 拒绝邀请 */
-    public void decline(Player p) {
-        Invite inv = invites.remove(p.getUniqueId());
-        if (inv == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c当前没有待处理的邀请。");
+    public void decline(Player player) {
+        Invite invite = this.invites.remove(player.getUniqueId());
+        if (invite == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5f53\u524d\u6ca1\u6709\u5f85\u5904\u7406\u7684\u9080\u8bf7\u3002");
             return;
         }
-        p.sendMessage(plugin.msg("prefix") + "§7已拒绝房间邀请。");
-        Player owner = Bukkit.getPlayer(inv.owner());
-        if (owner != null && owner.isOnline()) {
-            owner.sendMessage(plugin.msg("prefix") + "§c" + p.getName() + " §c拒绝了你的邀请。");
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u5df2\u62d2\u7edd\u623f\u95f4\u9080\u8bf7\u3002");
+        Player player2 = Bukkit.getPlayer((UUID)invite.owner());
+        if (player2 != null && player2.isOnline()) {
+            player2.sendMessage(this.plugin.msg("prefix") + "\u00a7c" + player.getName() + " \u00a7c\u62d2\u7edd\u4e86\u4f60\u7684\u9080\u8bf7\u3002");
         }
     }
 
-    /** 移除某玩家所有邀请 (退出/离线/对局开始等) */
-    public void clear(UUID uuid) {
-        invites.remove(uuid);
-        // 移除别人发给该玩家的邀请
-        invites.entrySet().removeIf(e -> e.getValue().target().equals(uuid)
-                || e.getValue().owner().equals(uuid));
+    public void clear(UUID uUID) {
+        this.invites.remove(uUID);
+        this.invites.entrySet().removeIf(entry -> ((Invite)entry.getValue()).target().equals(uUID) || ((Invite)entry.getValue()).owner().equals(uUID));
     }
 
-    /** 清理过期邀请 */
     private void cleanExpired() {
-        long now = System.currentTimeMillis();
-        invites.entrySet().removeIf(e -> e.getValue().expires() < now);
+        long l = System.currentTimeMillis();
+        this.invites.entrySet().removeIf(entry -> ((Invite)entry.getValue()).expires() < l);
     }
 
-    /** 是否有待处理邀请 (调试/校验用) */
-    public boolean hasPending(UUID uuid) {
-        return invites.containsKey(uuid);
+    public boolean hasPending(UUID uUID) {
+        return this.invites.containsKey(uUID);
+    }
+
+    private record Invite(UUID owner, UUID target, String roomId, long expires) {
     }
 }

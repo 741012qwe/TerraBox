@@ -1,318 +1,323 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.TextComponent
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.Registry
+ *  org.bukkit.Sound
+ *  org.bukkit.configuration.ConfigurationSection
+ *  org.bukkit.enchantments.Enchantment
+ *  org.bukkit.entity.Player
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ *  org.bukkit.persistence.PersistentDataContainer
+ *  org.bukkit.persistence.PersistentDataType
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.Registry;
-
+import com.terrabox.TerraBoxPlugin;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
+import org.bukkit.Sound;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 附魔系统 —— 附魔石 (从物资箱掉落), 右键对随机附魔星石应用到手持装备上
- *
- * 玩法:
- *  - 附魔石是一种可消耗道具 (PDC 标记 terrabox_enchant=附魔名)
- *  - 玩家右键附魔石: 将该附魔应用到手持物品 (武器/工具/护甲), 消耗附魔石
- *  - 附魔石从物资箱掉落 (loot 表里用 enchant-stone: <附魔或ALL> 引用)
- *  - 高级附魔石 (EXOTIC) 应用时不需经验; 普通石需要读本
- *
- * 线程模型: 构建物品为纯对象; 右键触发在玩家区域线程, 直接操作合法。
- */
 public class EnchantManager {
     public static final String KEY = "terrabox_enchant";
     private final TerraBoxPlugin plugin;
     private final NamespacedKey keyEnchant;
     private final NamespacedKey keyLevel;
+    private final Map<String, EnchantPool> pools = new HashMap<String, EnchantPool>();
 
-    /** 附魔池 (config enchant-stones 段定义; 无则内置默认) */
-    private final Map<String, EnchantPool> pools = new HashMap<>();
-
-    public record EnchantPool(Material material, String name, List<String> lore,
-                              boolean exotic) {}
-
-    public EnchantManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.keyEnchant = new NamespacedKey(plugin, "enchant");
-        this.keyLevel = new NamespacedKey(plugin, "enchant_level");
+    public EnchantManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.keyEnchant = new NamespacedKey((Plugin)terraBoxPlugin, "enchant");
+        this.keyLevel = new NamespacedKey((Plugin)terraBoxPlugin, "enchant_level");
     }
 
     public void load() {
-        pools.clear();
-        var sec = plugin.getConfig().getConfigurationSection("enchant-stones");
-        if (sec == null || sec.getKeys(false).isEmpty()) {
-            registerDefaults();
+        this.pools.clear();
+        ConfigurationSection configurationSection = this.plugin.getConfig().getConfigurationSection("enchant-stones");
+        if (configurationSection == null || configurationSection.getKeys(false).isEmpty()) {
+            this.registerDefaults();
             return;
         }
-        for (String key : sec.getKeys(false)) {
-            var s = sec.getConfigurationSection(key);
-            if (s == null) continue;
+        for (String string : configurationSection.getKeys(false)) {
+            ConfigurationSection configurationSection2 = configurationSection.getConfigurationSection(string);
+            if (configurationSection2 == null) continue;
             try {
-                Material mat = Material.matchMaterial(s.getString("material", "LAPIS_LAZULI"));
-                String name = s.getString("name", "&b附魔石");
-                List<String> lore = new ArrayList<>(s.getStringList("lore"));
-                boolean exotic = s.getBoolean("exotic", false);
-                pools.put(key.toLowerCase(Locale.ROOT), new EnchantPool(mat, name, lore, exotic));
-            } catch (Exception ignored) {}
+                Material material = Material.matchMaterial((String)configurationSection2.getString("material", "LAPIS_LAZULI"));
+                String string2 = configurationSection2.getString("name", "&b\u9644\u9b54\u77f3");
+                ArrayList<String> arrayList = new ArrayList<String>(configurationSection2.getStringList("lore"));
+                boolean bl = configurationSection2.getBoolean("exotic", false);
+                this.pools.put(string.toLowerCase(Locale.ROOT), new EnchantPool(material, string2, arrayList, bl));
+            }
+            catch (Exception exception) {}
         }
-        plugin.getLogger().info("附魔石表加载完成: " + pools.size() + " 种");
+        this.plugin.getLogger().info("\u9644\u9b54\u77f3\u8868\u52a0\u8f7d\u5b8c\u6210: " + this.pools.size() + " \u79cd");
     }
 
     private void registerDefaults() {
-        pools.put("normal", new EnchantPool(Material.LAPIS_LAZULI, "&b&l附魔石",
-                List.of("&7右键对手持的武器/工具/护甲施加一个随机附魔。", "&7右键使用前请手持目标装备。"), false));
-        pools.put("exotic", new EnchantPool(Material.AMETHYST_SHARD, "&d&l稀有附魔石",
-                List.of("&7右键对手持物品施加一个 &d高级附魔&7 (概率双倍强度)。", "&7右键使用前请手持目标装备。"), true));
+        this.pools.put("normal", new EnchantPool(Material.LAPIS_LAZULI, "&b&l\u9644\u9b54\u77f3", List.of("&7\u53f3\u952e\u5bf9\u624b\u6301\u7684\u6b66\u5668/\u5de5\u5177/\u62a4\u7532\u65bd\u52a0\u4e00\u4e2a\u968f\u673a\u9644\u9b54\u3002", "&7\u53f3\u952e\u4f7f\u7528\u524d\u8bf7\u624b\u6301\u76ee\u6807\u88c5\u5907\u3002"), false));
+        this.pools.put("exotic", new EnchantPool(Material.AMETHYST_SHARD, "&d&l\u7a00\u6709\u9644\u9b54\u77f3", List.of("&7\u53f3\u952e\u5bf9\u624b\u6301\u7269\u54c1\u65bd\u52a0\u4e00\u4e2a &d\u9ad8\u7ea7\u9644\u9b54&7 (\u6982\u7387\u53cc\u500d\u5f3a\u5ea6)\u3002", "&7\u53f3\u952e\u4f7f\u7528\u524d\u8bf7\u624b\u6301\u76ee\u6807\u88c5\u5907\u3002"), true));
     }
 
-    /** 构建一枚随机附魔石: 大部分普通(1-2级), 小部分高级(3-4级) (任意线程) */
     public ItemStack buildRandomStone() {
-        boolean exotic = Math.random() < 0.30; // 30% 概率高级石
-        if (exotic) {
-            return buildStoneEnch(randomEnchant(), randomLevel(3, 4), true);
+        boolean bl;
+        boolean bl2 = bl = Math.random() < 0.3;
+        if (bl) {
+            return this.buildStoneEnch(this.randomEnchant(), this.randomLevel(3, 4), true);
         }
-        return buildStoneEnch(randomEnchant(), randomLevel(1, 2), false);
+        return this.buildStoneEnch(this.randomEnchant(), this.randomLevel(1, 2), false);
     }
 
-    /** 构建指定附魔石 (任意线程) */
-    public ItemStack buildStone(Enchantment ench, int level) {
-        return buildStoneEnch(ench, level, level >= 3);
+    public ItemStack buildStone(Enchantment enchantment, int n) {
+        return this.buildStoneEnch(enchantment, n, n >= 3);
     }
 
-    /** 构建附魔石 (底层实现) */
-    private ItemStack buildStoneEnch(Enchantment ench, int level, boolean exotic) {
-        EnchantPool pool = pools.get(exotic ? "exotic" : "normal");
-        if (pool == null) pool = pools.get("normal");
-        if (pool == null) pool = new EnchantPool(Material.LAPIS_LAZULI, "&b&l附魔石", List.of(), false);
-        ItemStack it = new ItemStack(pool.material(), 1);
-        ItemMeta meta = it.getItemMeta();
-        if (meta != null) {
-            Component nameComp = LegacyComponentSerializer.legacyAmpersand().deserialize(pool.name());
-            meta.displayName(nameComp);
-            List<Component> lore = new ArrayList<>();
-            for (String line : pool.lore()) lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
-            String ename = nameOf(ench);
-            lore.add(LegacyComponentSerializer.legacyAmpersand()
-                    .deserialize("&7附魔: &f" + ename + " &7(等级 &e" + level + "&7)"));
-            meta.lore(lore);
-            it.setItemMeta(meta);
+    private ItemStack buildStoneEnch(Enchantment enchantment, int n, boolean bl) {
+        Object object;
+        ItemStack itemStack;
+        ItemMeta itemMeta;
+        EnchantPool enchantPool = this.pools.get(bl ? "exotic" : "normal");
+        if (enchantPool == null) {
+            enchantPool = this.pools.get("normal");
         }
-        String finalEnch = ench == null ? "SHARPNESS" : ench.getKey().getKey().toUpperCase(Locale.ROOT);
-        int finalLevel = level;
-        it.editMeta(m -> {
-            var pdc = m.getPersistentDataContainer();
-            pdc.set(keyEnchant, PersistentDataType.STRING, finalEnch);
-            pdc.set(keyLevel, PersistentDataType.INTEGER, finalLevel);
-        });
-        return it;
-    }
-
-    /** 判断是否为附魔石, 返回附魔名 (非附魔石返回 null) */
-    public String enchantOf(ItemStack it) {
-        if (it == null || it.getType() == Material.AIR) return null;
-        try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keyEnchant, PersistentDataType.STRING);
-        } catch (Throwable t) { return null; }
-    }
-
-    public boolean isEnchantStone(ItemStack it) { return enchantOf(it) != null; }
-
-    public int levelOf(ItemStack it) {
-        if (it == null) return 1;
-        try {
-            Integer v = it.getItemMeta().getPersistentDataContainer()
-                    .get(keyLevel, PersistentDataType.INTEGER);
-            return v == null ? 1 : v;
-        } catch (Throwable t) { return 1; }
-    }
-
-    /**
-     * 应用附魔: 右键附魔石时触发。将附魔应用到玩家手持物品。
-     * @return true=成功消耗附魔石, false=失败不消耗
-     * 玩家区域线程调用 (PlayerInteractEvent 进入)
-     */
-    public boolean apply(Player player, ItemStack stone) {
-        String enchName = enchantOf(stone);
-        if (enchName == null) return false;
-        // 从 Registry 查找附魔 (旧 API getByName 可能已移除, 统一走 Registry)
-        Enchantment ench = null;
-        try { ench = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(enchName.toLowerCase(Locale.ROOT))); }
-        catch (Throwable t) { ench = null; }
-        if (ench == null) {
-            player.sendMessage(plugin.msg("prefix") + "§c未知附魔: " + enchName);
-            return false;
+        if (enchantPool == null) {
+            enchantPool = new EnchantPool(Material.LAPIS_LAZULI, "&b&l\u9644\u9b54\u77f3", List.of(), false);
         }
-        int level = levelOf(stone);
-        // 目标 = 不持附魔石的那只手: 石在副手→附魔主手装备; 石在主手→附魔副手装备
-        boolean stoneInOff = isOffHandStone(player, stone);
-        ItemStack target = stoneInOff
-                ? player.getInventory().getItemInMainHand()
-                : player.getInventory().getItemInOffHand();
-        // 不能对附魔石本身应用
-        if (isEnchantStone(target)) {
-            player.sendMessage(plugin.msg("prefix") + "§c请在另一只手持有要附魔的装备 (不要两手都拿附魔石)。");
-            return false;
-        }
-        if (target == null || target.getType().isAir()
-                || !target.getType().name().contains("_SWORD")
-                && !target.getType().name().contains("_PICKAXE")
-                && !target.getType().name().contains("_AXE")
-                && !target.getType().name().contains("_SHOVEL")
-                && !target.getType().name().contains("_HOE")
-                && !target.getType().name().contains("_BOW")
-                && !target.getType().name().contains("CROSSBOW")
-                && !target.getType().name().contains("_HELMET")
-                && !target.getType().name().contains("_CHESTPLATE")
-                && !target.getType().name().contains("_LEGGINGS")
-                && !target.getType().name().contains("_BOOTS")
-                && !target.getType().name().contains("TRIDENT")) {
-            player.sendMessage(plugin.msg("prefix") + "§c请手持一件可附魔的装备 (武器/工具/盔甲)。");
-            return false;
-        }
-        // 应用附魔
-        try {
-            target.addUnsafeEnchantment(ench, level);
-            // 写回目标所在的手 (石在副手→目标在主手; 石在主手→目标在副手)
-            if (stoneInOff) player.getInventory().setItemInMainHand(target);
-            else player.getInventory().setItemInOffHand(target);
-            player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
-            player.sendMessage(plugin.msg("prefix") + "§a已为手持装备附魔: §f" + nameOf(ench)
-                    + " §7(等级 §e" + level + "§7)");
-            return true; // 消耗附魔石
-        } catch (Throwable t) {
-            player.sendMessage(plugin.msg("prefix") + "§c附魔失败: " + t.getMessage());
-            return false;
-        }
-    }
-
-    /** 判断附魔石当前是否在玩家副手 (用于确定目标手) */
-    private boolean isOffHandStone(Player player, ItemStack stone) {
-        try {
-            ItemStack off = player.getInventory().getItemInOffHand();
-            if (off != null && !off.getType().isAir() && isEnchantStone(off)) {
-                // 副手是附魔石: 主手也是附魔石时优先按"石在主手"处理, 否则副手为石
-                ItemStack main = player.getInventory().getItemInMainHand();
-                return !(main != null && !main.getType().isAir() && isEnchantStone(main));
+        if ((itemMeta = (itemStack = new ItemStack(enchantPool.material(), 1)).getItemMeta()) != null) {
+            object = LegacyComponentSerializer.legacyAmpersand().deserialize(enchantPool.name());
+            itemMeta.displayName((Component)object);
+            ArrayList<TextComponent> arrayList = new ArrayList<TextComponent>();
+            for (String string : enchantPool.lore()) {
+                arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize(string));
             }
-        } catch (Throwable ignored) {}
+            String string = EnchantManager.nameOf(enchantment);
+            arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&7\u9644\u9b54: &f" + (String)string + " &7(\u7b49\u7ea7 &e" + n + "&7)"));
+            itemMeta.lore(arrayList);
+            itemStack.setItemMeta(itemMeta);
+        }
+        object = enchantment == null ? "SHARPNESS" : enchantment.getKey().getKey().toUpperCase(Locale.ROOT);
+        int n2 = n;
+        itemStack.editMeta(arg_0 -> this.lambda$buildStoneEnch$0((String)object, n2, arg_0));
+        return itemStack;
+    }
+
+    public String enchantOf(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return null;
+        }
+        try {
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyEnchant, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
+    }
+
+    public boolean isEnchantStone(ItemStack itemStack) {
+        return this.enchantOf(itemStack) != null;
+    }
+
+    public int levelOf(ItemStack itemStack) {
+        if (itemStack == null) {
+            return 1;
+        }
+        try {
+            Integer n = (Integer)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyLevel, PersistentDataType.INTEGER);
+            return n == null ? 1 : n;
+        }
+        catch (Throwable throwable) {
+            return 1;
+        }
+    }
+
+    public boolean apply(Player player, ItemStack itemStack) {
+        ItemStack itemStack2;
+        String string = this.enchantOf(itemStack);
+        if (string == null) {
+            return false;
+        }
+        Enchantment enchantment = null;
+        try {
+            enchantment = (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string.toLowerCase(Locale.ROOT)));
+        }
+        catch (Throwable throwable) {
+            enchantment = null;
+        }
+        if (enchantment == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u672a\u77e5\u9644\u9b54: " + string);
+            return false;
+        }
+        int n = this.levelOf(itemStack);
+        boolean bl = this.isOffHandStone(player, itemStack);
+        ItemStack itemStack3 = itemStack2 = bl ? player.getInventory().getItemInMainHand() : player.getInventory().getItemInOffHand();
+        if (this.isEnchantStone(itemStack2)) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u8bf7\u5728\u53e6\u4e00\u53ea\u624b\u6301\u6709\u8981\u9644\u9b54\u7684\u88c5\u5907 (\u4e0d\u8981\u4e24\u624b\u90fd\u62ff\u9644\u9b54\u77f3)\u3002");
+            return false;
+        }
+        if (!(itemStack2 != null && !itemStack2.getType().isAir() && (itemStack2.getType().name().contains("_SWORD") || itemStack2.getType().name().contains("_PICKAXE") || itemStack2.getType().name().contains("_AXE") || itemStack2.getType().name().contains("_SHOVEL") || itemStack2.getType().name().contains("_HOE") || itemStack2.getType().name().contains("_BOW") || itemStack2.getType().name().contains("CROSSBOW") || itemStack2.getType().name().contains("_HELMET") || itemStack2.getType().name().contains("_CHESTPLATE") || itemStack2.getType().name().contains("_LEGGINGS") || itemStack2.getType().name().contains("_BOOTS") || itemStack2.getType().name().contains("TRIDENT")))) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u8bf7\u624b\u6301\u4e00\u4ef6\u53ef\u9644\u9b54\u7684\u88c5\u5907 (\u6b66\u5668/\u5de5\u5177/\u76d4\u7532)\u3002");
+            return false;
+        }
+        try {
+            itemStack2.addUnsafeEnchantment(enchantment, n);
+            if (bl) {
+                player.getInventory().setItemInMainHand(itemStack2);
+            } else {
+                player.getInventory().setItemInOffHand(itemStack2);
+            }
+            player.getWorld().playSound(player.getLocation(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u4e3a\u624b\u6301\u88c5\u5907\u9644\u9b54: \u00a7f" + EnchantManager.nameOf(enchantment) + " \u00a77(\u7b49\u7ea7 \u00a7e" + n + "\u00a77)");
+            return true;
+        }
+        catch (Throwable throwable) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u9644\u9b54\u5931\u8d25: " + throwable.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isOffHandStone(Player player, ItemStack itemStack) {
+        try {
+            ItemStack itemStack2 = player.getInventory().getItemInOffHand();
+            if (itemStack2 != null && !itemStack2.getType().isAir() && this.isEnchantStone(itemStack2)) {
+                ItemStack itemStack3 = player.getInventory().getItemInMainHand();
+                return itemStack3 == null || itemStack3.getType().isAir() || !this.isEnchantStone(itemStack3);
+            }
+        }
+        catch (Throwable throwable) {
+            // empty catch block
+        }
         return false;
     }
 
-    /**
-     * 判断附魔石是否在主手 (用于背包点击模式确定目标手)
-     * @return true=石在主手, false=石在副手或不在手上
-     */
-    public boolean isMainHandStone(Player player, ItemStack stone) {
+    public boolean isMainHandStone(Player player, ItemStack itemStack) {
         try {
-            ItemStack main = player.getInventory().getItemInMainHand();
-            return main != null && !main.getType().isAir() && isEnchantStone(main);
-        } catch (Throwable ignored) {
+            ItemStack itemStack2 = player.getInventory().getItemInMainHand();
+            return itemStack2 != null && !itemStack2.getType().isAir() && this.isEnchantStone(itemStack2);
+        }
+        catch (Throwable throwable) {
             return false;
         }
     }
 
-    /**
-     * 应用附魔到指定装备 (背包点击模式专用)
-     * @param player 玩家
-     * @param stone 附魔石 (从光标扣减)
-     * @param targetEquip 目标装备
-     * @return true=成功
-     */
-    public boolean applyToTarget(Player player, ItemStack stone, ItemStack targetEquip) {
-        String enchName = enchantOf(stone);
-        if (enchName == null) return false;
-        Enchantment ench = null;
-        try { ench = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(enchName.toLowerCase(Locale.ROOT))); }
-        catch (Throwable t) { ench = null; }
-        if (ench == null) {
-            player.sendMessage(plugin.msg("prefix") + "§c未知附魔: " + enchName);
+    public boolean applyToTarget(Player player, ItemStack itemStack, ItemStack itemStack2) {
+        String string = this.enchantOf(itemStack);
+        if (string == null) {
             return false;
         }
-        int level = levelOf(stone);
-        if (targetEquip == null || targetEquip.getType().isAir()) {
-            player.sendMessage(plugin.msg("prefix") + "§c目标装备为空。");
+        Enchantment enchantment = null;
+        try {
+            enchantment = (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string.toLowerCase(Locale.ROOT)));
+        }
+        catch (Throwable throwable) {
+            enchantment = null;
+        }
+        if (enchantment == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u672a\u77e5\u9644\u9b54: " + string);
             return false;
         }
-        if (isEnchantStone(targetEquip)) {
-            player.sendMessage(plugin.msg("prefix") + "§c目标不是可附魔装备。");
+        int n = this.levelOf(itemStack);
+        if (itemStack2 == null || itemStack2.getType().isAir()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u76ee\u6807\u88c5\u5907\u4e3a\u7a7a\u3002");
+            return false;
+        }
+        if (this.isEnchantStone(itemStack2)) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u76ee\u6807\u4e0d\u662f\u53ef\u9644\u9b54\u88c5\u5907\u3002");
             return false;
         }
         try {
-            targetEquip.addUnsafeEnchantment(ench, level);
-            player.getWorld().playSound(player.getLocation(), org.bukkit.Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
-            player.sendMessage(plugin.msg("prefix") + "§a已为装备附魔: §f" + nameOf(ench)
-                    + " §7(等级 §e" + level + "§7)");
+            itemStack2.addUnsafeEnchantment(enchantment, n);
+            player.getWorld().playSound(player.getLocation(), Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.2f);
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u4e3a\u88c5\u5907\u9644\u9b54: \u00a7f" + EnchantManager.nameOf(enchantment) + " \u00a77(\u7b49\u7ea7 \u00a7e" + n + "\u00a77)");
             return true;
-        } catch (Throwable t) {
-            player.sendMessage(plugin.msg("prefix") + "§c附魔失败: " + t.getMessage());
+        }
+        catch (Throwable throwable) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u9644\u9b54\u5931\u8d25: " + throwable.getMessage());
             return false;
         }
     }
+
     public Enchantment randomEnchant() {
-        Enchantment[] es;
+        Enchantment[] enchantmentArray;
+        ArrayList<Enchantment> arrayList;
         try {
-            java.util.List<Enchantment> list = new ArrayList<>();
-            Registry.ENCHANTMENT.forEach(list::add);
-            es = list.toArray(new Enchantment[0]);
-        } catch (Throwable t) {
-            es = new Enchantment[]{fallbackEnch()};
+            arrayList = new ArrayList<Enchantment>();
+            Registry.ENCHANTMENT.forEach(arrayList::add);
+            enchantmentArray = arrayList.toArray(new Enchantment[0]);
         }
-        if (es.length == 0) return fallbackEnch();
-        // 只取武器/工具/盔甲类可用附魔 (过滤无关)
-        List<Enchantment> usable = new ArrayList<>();
-        for (Enchantment e : es) {
-            if (e == null) continue;
-            String k = e.getKey().getKey().toLowerCase(Locale.ROOT);
-            if (k.contains("sharpness") || k.contains("smite") || k.contains("bane")
-                    || k.contains("protection") || k.contains("power")
-                    || k.contains("unbreaking") || k.contains("efficiency")
-                    || k.contains("fortune") || k.contains("fire")
-                    || k.contains("looting") || k.contains("thorns")
-                    || k.contains("respiration") || k.contains("feather")
-                    || k.contains("mending") || k.contains("punch")
-                    || k.contains("flame") || k.contains("lure")
-                    || k.contains("luck") || k.contains("sweeping")
-                    || k.contains("knockback") || k.contains("impaling")
-                    || k.contains("infinity") || k.contains("depth")
-                    || k.contains("aqua") || k.contains("silktouch")
-                    || k.contains("piercing") || k.contains("quick_charge")
-                    || k.contains("loyalty") || k.contains("riptide")
-                    || k.contains("channeling") || k.contains("multishot")
-                    || k.contains("swift_sneak") || k.contains("soul_speed")) {
-                usable.add(e);
-            }
+        catch (Throwable throwable) {
+            enchantmentArray = new Enchantment[]{this.fallbackEnch()};
         }
-        if (usable.isEmpty()) return fallbackEnch();
-        return usable.get(ThreadLocalRandom.current().nextInt(usable.size()));
+        if (enchantmentArray.length == 0) {
+            return this.fallbackEnch();
+        }
+        arrayList = new ArrayList();
+        for (Enchantment enchantment : enchantmentArray) {
+            String string;
+            if (enchantment == null || !(string = enchantment.getKey().getKey().toLowerCase(Locale.ROOT)).contains("sharpness") && !string.contains("smite") && !string.contains("bane") && !string.contains("protection") && !string.contains("power") && !string.contains("unbreaking") && !string.contains("efficiency") && !string.contains("fortune") && !string.contains("fire") && !string.contains("looting") && !string.contains("thorns") && !string.contains("respiration") && !string.contains("feather") && !string.contains("mending") && !string.contains("punch") && !string.contains("flame") && !string.contains("lure") && !string.contains("luck") && !string.contains("sweeping") && !string.contains("knockback") && !string.contains("impaling") && !string.contains("infinity") && !string.contains("depth") && !string.contains("aqua") && !string.contains("silktouch") && !string.contains("piercing") && !string.contains("quick_charge") && !string.contains("loyalty") && !string.contains("riptide") && !string.contains("channeling") && !string.contains("multishot") && !string.contains("swift_sneak") && !string.contains("soul_speed")) continue;
+            arrayList.add(enchantment);
+        }
+        if (arrayList.isEmpty()) {
+            return this.fallbackEnch();
+        }
+        return (Enchantment)arrayList.get(ThreadLocalRandom.current().nextInt(arrayList.size()));
     }
 
-    /** 兜底附魔: Registry 查找, 失败返回 null (上层有判空) */
     private Enchantment fallbackEnch() {
-        try { return Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness")); }
-        catch (Throwable t) { return null; }
+        try {
+            return (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)"sharpness"));
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
     }
 
-    private int randomLevel(int min, int max) {
-        return ThreadLocalRandom.current().nextInt(min, max + 1);
+    private int randomLevel(int n, int n2) {
+        return ThreadLocalRandom.current().nextInt(n, n2 + 1);
     }
 
-    private static String nameOf(Enchantment ench) {
-        if (ench == null) return "?";
-        String k = ench.getKey().getKey();
-        String[] parts = k.split("_");
-        StringBuilder sb = new StringBuilder();
-        for (String p : parts) sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1)).append(' ');
-        return sb.toString().trim();
+    private static String nameOf(Enchantment enchantment) {
+        if (enchantment == null) {
+            return "?";
+        }
+        String string = enchantment.getKey().getKey();
+        String[] stringArray = string.split("_");
+        StringBuilder stringBuilder = new StringBuilder();
+        for (String string2 : stringArray) {
+            stringBuilder.append(Character.toUpperCase(string2.charAt(0))).append(string2.substring(1)).append(' ');
+        }
+        return stringBuilder.toString().trim();
+    }
+
+    private /* synthetic */ void lambda$buildStoneEnch$0(String string, int n, ItemMeta itemMeta) {
+        PersistentDataContainer persistentDataContainer = itemMeta.getPersistentDataContainer();
+        persistentDataContainer.set(this.keyEnchant, PersistentDataType.STRING, (Object)string);
+        persistentDataContainer.set(this.keyLevel, PersistentDataType.INTEGER, (Object)n);
+    }
+
+    public record EnchantPool(Material material, String name, List<String> lore, boolean exotic) {
     }
 }

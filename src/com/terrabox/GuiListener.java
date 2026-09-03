@@ -1,430 +1,558 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.ChatColor
+ *  org.bukkit.GameRule
+ *  org.bukkit.Material
+ *  org.bukkit.Sound
+ *  org.bukkit.World
+ *  org.bukkit.command.CommandSender
+ *  org.bukkit.entity.Player
+ *  org.bukkit.event.EventHandler
+ *  org.bukkit.event.EventPriority
+ *  org.bukkit.event.Listener
+ *  org.bukkit.event.inventory.ClickType
+ *  org.bukkit.event.inventory.InventoryClickEvent
+ *  org.bukkit.event.inventory.InventoryCloseEvent
+ *  org.bukkit.event.inventory.InventoryDragEvent
+ *  org.bukkit.inventory.Inventory
+ *  org.bukkit.inventory.InventoryHolder
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.CraftGui;
+import com.terrabox.GameManager;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import com.terrabox.TerrainType;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.GameRule;
 import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
 
-import java.util.Map;
-
-/**
- * GUI 事件分派 (InventoryHolder 机制, 白皮书 §6.1):
- *  - 用 Bukkit 原生 InventoryHolder 标记 GUI 类型, 事件里 getHolder() 直接识别
- *    (不再依赖 inventory 对象比较 —— Folia 下 view top inventory 可能与创建对象不一致)
- *  - MENU: 按槽位分发玩法入口
- *  - SELL: 上区自由放取, 按钮槽位禁止移动, 关闭退回物品
- */
-public class GuiListener implements Listener {
+public class GuiListener
+implements Listener {
     private final TerraBoxPlugin plugin;
 
-    public GuiListener(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public GuiListener(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    enum Type { MENU, SELL, TERRAIN, GAME, CRAFT, ARTIFACT, INVITE, ROOM }
-
-    /** GUI 容器标识: 挂在 createInventory 的 holder 上, 跨线程只读安全 */
-    public static class GuiHolder implements InventoryHolder {
-        public final Type type;
-        public Inventory inv;
-        public int craftIndex = 0; // 工作台当前配方索引 (CRAFT 类型)
-        public String inviteRoom = null; // 邀请目标房间 (INVITE 类型)
-        public GuiHolder(Type type) {
-            this.type = type;
-        }
-        @Override
-        public Inventory getInventory() {
-            return inv;
-        }
+    private GuiHolder holderOf(Inventory inventory) {
+        GuiHolder guiHolder;
+        InventoryHolder inventoryHolder;
+        return inventory != null && (inventoryHolder = inventory.getHolder()) instanceof GuiHolder ? (guiHolder = (GuiHolder)inventoryHolder) : null;
     }
 
-    private GuiHolder holderOf(Inventory top) {
-        return (top != null && top.getHolder() instanceof GuiHolder gh) ? gh : null;
-    }
-
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onClick(InventoryClickEvent e) {
-        Inventory top = e.getView().getTopInventory();
-        GuiHolder gh = holderOf(top);
-        if (gh == null) return;
-        Player p = (Player) e.getWhoClicked();
-        int raw = e.getRawSlot();
-
-        if (gh.type == Type.MENU) {
-            e.setCancelled(true);
-            if (raw < 0 || raw >= top.getSize()) return;
-            ItemStack it = e.getCurrentItem();
-            if (it == null || it.getType() == Material.AIR) return;
-            switch (raw) {
-                case 10 -> plugin.spawns().spawnPlayer(p, true);
-                case 12 -> plugin.sells().open(p);
-                case 14 -> plugin.hunts().hunt(p);
-                case 16 -> plugin.cmd().sendTop(p);
-                case 11 -> sendDistribution(p);
-                case 15 -> plugin.cmd().sendStats(p, p);
-                case 13 -> p.sendMessage(plugin.msg("prefix") + "§e玩法说明已列在菜单图标中, /box 也可随时查看。");
-                case 18 -> plugin.gameGui().open(p); // 对局模式选择(GUI)
-                case 22 -> plugin.cmd().sendGameStatus(p); // 对局状态
-                case 19 -> plugin.rooms().requestReturnToLobby(p);  // 返回大厅 (对局中禁止)
-                case 21 -> plugin.terrainSelect().open(p); // 选择对局地形
-                case 17 -> plugin.roomGui().open(p); // 对局房间列表
-                default -> {}
-            }
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=true)
+    public void onClick(InventoryClickEvent inventoryClickEvent) {
+        Inventory inventory = inventoryClickEvent.getView().getTopInventory();
+        GuiHolder guiHolder = this.holderOf(inventory);
+        if (guiHolder == null) {
             return;
         }
-
-        if (gh.type == Type.GAME) {
-            e.setCancelled(true);
-            if (raw < 0 || raw >= top.getSize()) return;
-            ItemStack it = e.getCurrentItem();
-            if (it == null || it.getType() == Material.AIR) return;
-            switch (raw) {
-                case 10 -> joinMode(p, GameManager.Mode.SOLO);   // 单人
-                case 13 -> joinMode(p, GameManager.Mode.PVP);    // 多人PVP
-                case 16 -> joinMode(p, GameManager.Mode.TEAM);   // 组队
-                case 18 -> plugin.cmd().sendGameStatus(p);       // 状态
-                case 22 -> plugin.menus().open(p);               // 返回主菜单
-                case 24 -> {
-                    if (p.hasPermission("terrabox.admin")) {
-                        p.sendMessage(plugin.msg("prefix")
-                                + "§e管理员开赛命令: §6/box room start <solo|pvp|team> <solo|pvp|team>");
-                        p.sendMessage(plugin.msg("prefix")
-                                + "§7例: §e/box room start pvp pvp §7(在pvp房间开多人对战)");
-                    }
-                }
-                default -> {}
-            }
-            return;
-        }
-
-        if (gh.type == Type.TERRAIN) {
-            e.setCancelled(true);
-            if (raw < 0 || raw >= top.getSize()) return;
-            ItemStack it = e.getCurrentItem();
-            if (it == null || it.getType() == Material.AIR) return;
-            switch (raw) {
-                case 10 -> selectTerrain(p, TerrainType.DEFAULT);
-                case 11 -> selectTerrain(p, TerrainType.DESERT);
-                case 12 -> selectTerrain(p, TerrainType.ISLANDS);
-                case 13 -> selectTerrain(p, TerrainType.THE_END);
-                case 14 -> selectTerrain(p, TerrainType.BADLANDS);
-                case 15 -> selectTerrain(p, TerrainType.NETHER);
-                case 16 -> selectTerrain(p, TerrainType.CITY);
-                case 17 -> selectTerrain(p, TerrainType.NORMAL);
-                case 22 -> p.closeInventory(); // 取消
-                case 26 -> createNewTerrainWorld(p); // 生成新世界
-                default -> {}
-            }
-            return;
-        }
-
-        if (gh.type == Type.CRAFT) {
-            // 按钮区一律取消; 材料槽只接受合法碎片/材料(防止神器等误放)
-            if (raw >= 0 && raw < top.getSize() && isCraftMatSlot(raw)) {
-                // 材料槽: 禁止 Shift/Double/数字键/副手交换批量移动, 只允许普通单击放/取
-                if (e.getClick().isShiftClick() || e.getClick() == org.bukkit.event.inventory.ClickType.DOUBLE_CLICK
-                        || e.getClick() == org.bukkit.event.inventory.ClickType.NUMBER_KEY
-                        || e.getClick() == org.bukkit.event.inventory.ClickType.SWAP_OFFHAND) {
-                    e.setCancelled(true);
-                    return;
-                }
-                e.setCancelled(true); // 完全接管材料槽交互, 手动做光标↔槽放/取, 防止材料错乱飘进背包
-                ItemStack cursor = e.getCursor();
-                ItemStack current = e.getCurrentItem();
-                boolean cursorOk = cursor == null || cursor.getType().isAir() || plugin.crafts().isCraftItem(cursor);
-                if (!cursorOk) {
-                    p.playSound(p.getLocation(), org.bukkit.Sound.ENTITY_VILLAGER_NO, 1f, 1.2f);
-                    p.sendMessage(plugin.msg("prefix") + "§c只能放入碎片/材料, 无法放置此物品。");
-                    return; // 光标不合法, 什么都不做
-                }
-                // 手动交换: 槽内物品与光标物品互换 (光标空=取出, 槽空=放入, 都有=交换)
-                ItemStack newSlot = cursor;
-                ItemStack newCursor = current;
-                // 若槽内已有非材料(异常残留), 禁止操作
-                if (current != null && !current.getType().isAir() && !plugin.crafts().isCraftItem(current)) {
-                    p.sendMessage(plugin.msg("prefix") + "§c材料槽存在异常物品, 请关闭重开。");
-                    return;
-                }
-                e.setCurrentItem(newSlot != null && newSlot.getType().isAir() ? null : newSlot.clone());
-                e.getView().setCursor(newCursor != null && newCursor.getType().isAir() ? null : newCursor.clone());
+        Player player = (Player)inventoryClickEvent.getWhoClicked();
+        int n = inventoryClickEvent.getRawSlot();
+        if (guiHolder.type == Type.MENU) {
+            inventoryClickEvent.setCancelled(true);
+            if (n < 0 || n >= inventory.getSize()) {
                 return;
             }
-            if (raw < 0 || raw >= top.getSize()) return; // 背包区放行
-            e.setCancelled(true);
-            if (raw == CraftGui.OUTPUT_SLOT) return; // 产物只读
-            switch (raw) {
-                case CraftGui.PREV_SLOT -> {
-                    GuiListener.GuiHolder hh = gh;
-                    // 翻页 = 切换配方: 清空材料槽并重新渲染新配方需求 (不保留旧配方材料, 避免错乱)
-                    hh.craftIndex = (hh.craftIndex - 1 + plugin.crafts().recipes().size())
-                            % Math.max(1, plugin.crafts().recipes().size());
-                    plugin.craftsGui().render(p, top, hh);
+            ItemStack itemStack = inventoryClickEvent.getCurrentItem();
+            if (itemStack == null || itemStack.getType() == Material.AIR) {
+                return;
+            }
+            switch (n) {
+                case 10: {
+                    this.plugin.spawns().spawnPlayer(player, true);
+                    break;
                 }
-                case CraftGui.NEXT_SLOT -> {
-                    GuiListener.GuiHolder hh = gh;
-                    hh.craftIndex = (hh.craftIndex + 1) % Math.max(1, plugin.crafts().recipes().size());
-                    plugin.craftsGui().render(p, top, hh);
+                case 12: {
+                    this.plugin.sells().open(player);
+                    break;
                 }
-                case CraftGui.CRAFT_SLOT -> plugin.craftsGui().craft(p, top, gh);
-                case CraftGui.CLOSE_SLOT -> p.closeInventory();
-                default -> {}
+                case 14: {
+                    this.plugin.hunts().hunt(player);
+                    break;
+                }
+                case 16: {
+                    this.plugin.cmd().sendTop((CommandSender)player);
+                    break;
+                }
+                case 11: {
+                    this.sendDistribution(player);
+                    break;
+                }
+                case 15: {
+                    this.plugin.cmd().sendStats((CommandSender)player, player);
+                    break;
+                }
+                case 13: {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u73a9\u6cd5\u8bf4\u660e\u5df2\u5217\u5728\u83dc\u5355\u56fe\u6807\u4e2d, /box \u4e5f\u53ef\u968f\u65f6\u67e5\u770b\u3002");
+                    break;
+                }
+                case 18: {
+                    this.plugin.gameGui().open(player);
+                    break;
+                }
+                case 22: {
+                    this.plugin.cmd().sendGameStatus((CommandSender)player);
+                    break;
+                }
+                case 19: {
+                    this.plugin.rooms().requestReturnToLobby(player);
+                    break;
+                }
+                case 21: {
+                    this.plugin.terrainSelect().open(player);
+                    break;
+                }
+                case 17: {
+                    this.plugin.roomGui().open(player);
+                    break;
+                }
             }
             return;
         }
-
-        if (gh.type == Type.ARTIFACT) {
-            // 神器图鉴: 全只读, 禁止任何点击移动
-            e.setCancelled(true);
+        if (guiHolder.type == Type.GAME) {
+            inventoryClickEvent.setCancelled(true);
+            if (n < 0 || n >= inventory.getSize()) {
+                return;
+            }
+            ItemStack itemStack = inventoryClickEvent.getCurrentItem();
+            if (itemStack == null || itemStack.getType() == Material.AIR) {
+                return;
+            }
+            switch (n) {
+                case 10: {
+                    this.joinMode(player, GameManager.Mode.SOLO);
+                    break;
+                }
+                case 13: {
+                    this.joinMode(player, GameManager.Mode.PVP);
+                    break;
+                }
+                case 16: {
+                    this.joinMode(player, GameManager.Mode.TEAM);
+                    break;
+                }
+                case 18: {
+                    this.plugin.cmd().sendGameStatus((CommandSender)player);
+                    break;
+                }
+                case 22: {
+                    this.plugin.menus().open(player);
+                    break;
+                }
+                case 24: {
+                    if (!player.hasPermission("terrabox.admin")) break;
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7ba1\u7406\u5458\u5f00\u8d5b\u547d\u4ee4: \u00a76/box room start <solo|pvp|team> <solo|pvp|team>");
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u4f8b: \u00a7e/box room start pvp pvp \u00a77(\u5728pvp\u623f\u95f4\u5f00\u591a\u4eba\u5bf9\u6218)");
+                    break;
+                }
+            }
             return;
         }
-
-        if (gh.type == Type.INVITE) {
-            // 邀请面板: 只读, 点击玩家头邀请; 一切移动取消
-            e.setCancelled(true);
-            if (raw < 0 || raw >= top.getSize()) return;
-            ItemStack it = e.getCurrentItem();
-            if (it == null || it.getType() == Material.AIR) return;
-            String targetRoom = gh.inviteRoom != null ? gh.inviteRoom : "default";
-            // 玩家头: 名字从 displayName 提取 (去掉颜色码)
-            if (e.getCurrentItem().getType() == Material.PLAYER_HEAD && e.getCurrentItem().getItemMeta() != null) {
-                String nm = org.bukkit.ChatColor.stripColor(e.getCurrentItem().getItemMeta().getDisplayName());
-                Player target = Bukkit.getPlayer(nm);
-                if (target != null && target.isOnline()) {
-                    plugin.invites().invite(p, target, targetRoom);
+        if (guiHolder.type == Type.TERRAIN) {
+            inventoryClickEvent.setCancelled(true);
+            if (n < 0 || n >= inventory.getSize()) {
+                return;
+            }
+            ItemStack itemStack = inventoryClickEvent.getCurrentItem();
+            if (itemStack == null || itemStack.getType() == Material.AIR) {
+                return;
+            }
+            switch (n) {
+                case 10: {
+                    this.selectTerrain(player, TerrainType.DEFAULT);
+                    break;
+                }
+                case 11: {
+                    this.selectTerrain(player, TerrainType.DESERT);
+                    break;
+                }
+                case 12: {
+                    this.selectTerrain(player, TerrainType.ISLANDS);
+                    break;
+                }
+                case 13: {
+                    this.selectTerrain(player, TerrainType.THE_END);
+                    break;
+                }
+                case 14: {
+                    this.selectTerrain(player, TerrainType.BADLANDS);
+                    break;
+                }
+                case 15: {
+                    this.selectTerrain(player, TerrainType.NETHER);
+                    break;
+                }
+                case 16: {
+                    this.selectTerrain(player, TerrainType.CITY);
+                    break;
+                }
+                case 17: {
+                    this.selectTerrain(player, TerrainType.NORMAL);
+                    break;
+                }
+                case 22: {
+                    player.closeInventory();
+                    break;
+                }
+                case 26: {
+                    this.createNewTerrainWorld(player);
+                    break;
+                }
+            }
+            return;
+        }
+        if (guiHolder.type == Type.CRAFT) {
+            if (n >= 0 && n < inventory.getSize() && this.isCraftMatSlot(n)) {
+                boolean bl;
+                if (inventoryClickEvent.getClick().isShiftClick() || inventoryClickEvent.getClick() == ClickType.DOUBLE_CLICK || inventoryClickEvent.getClick() == ClickType.NUMBER_KEY || inventoryClickEvent.getClick() == ClickType.SWAP_OFFHAND) {
+                    inventoryClickEvent.setCancelled(true);
+                    return;
+                }
+                inventoryClickEvent.setCancelled(true);
+                ItemStack itemStack = inventoryClickEvent.getCursor();
+                ItemStack itemStack2 = inventoryClickEvent.getCurrentItem();
+                boolean bl2 = bl = itemStack == null || itemStack.getType().isAir() || this.plugin.crafts().isCraftItem(itemStack);
+                if (!bl) {
+                    player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0f, 1.2f);
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u53ea\u80fd\u653e\u5165\u788e\u7247/\u6750\u6599, \u65e0\u6cd5\u653e\u7f6e\u6b64\u7269\u54c1\u3002");
+                    return;
+                }
+                ItemStack itemStack3 = itemStack;
+                ItemStack itemStack4 = itemStack2;
+                if (itemStack2 != null && !itemStack2.getType().isAir() && !this.plugin.crafts().isCraftItem(itemStack2)) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6750\u6599\u69fd\u5b58\u5728\u5f02\u5e38\u7269\u54c1, \u8bf7\u5173\u95ed\u91cd\u5f00\u3002");
+                    return;
+                }
+                inventoryClickEvent.setCurrentItem((ItemStack)(itemStack3 != null && itemStack3.getType().isAir() ? null : itemStack3.clone()));
+                inventoryClickEvent.getView().setCursor((ItemStack)(itemStack4 != null && itemStack4.getType().isAir() ? null : itemStack4.clone()));
+                return;
+            }
+            if (n < 0 || n >= inventory.getSize()) {
+                return;
+            }
+            inventoryClickEvent.setCancelled(true);
+            if (n == 24) {
+                return;
+            }
+            switch (n) {
+                case 46: {
+                    GuiHolder guiHolder2 = guiHolder;
+                    guiHolder2.craftIndex = (guiHolder2.craftIndex - 1 + this.plugin.crafts().recipes().size()) % Math.max(1, this.plugin.crafts().recipes().size());
+                    this.plugin.craftsGui().render(player, inventory, guiHolder2);
+                    break;
+                }
+                case 47: {
+                    GuiHolder guiHolder3 = guiHolder;
+                    guiHolder3.craftIndex = (guiHolder3.craftIndex + 1) % Math.max(1, this.plugin.crafts().recipes().size());
+                    this.plugin.craftsGui().render(player, inventory, guiHolder3);
+                    break;
+                }
+                case 49: {
+                    this.plugin.craftsGui().craft(player, inventory, guiHolder);
+                    break;
+                }
+                case 50: {
+                    player.closeInventory();
+                    break;
+                }
+            }
+            return;
+        }
+        if (guiHolder.type == Type.ARTIFACT) {
+            inventoryClickEvent.setCancelled(true);
+            return;
+        }
+        if (guiHolder.type == Type.INVITE) {
+            String string;
+            inventoryClickEvent.setCancelled(true);
+            if (n < 0 || n >= inventory.getSize()) {
+                return;
+            }
+            ItemStack itemStack = inventoryClickEvent.getCurrentItem();
+            if (itemStack == null || itemStack.getType() == Material.AIR) {
+                return;
+            }
+            String string2 = string = guiHolder.inviteRoom != null ? guiHolder.inviteRoom : "default";
+            if (inventoryClickEvent.getCurrentItem().getType() == Material.PLAYER_HEAD && inventoryClickEvent.getCurrentItem().getItemMeta() != null) {
+                String string3 = ChatColor.stripColor((String)inventoryClickEvent.getCurrentItem().getItemMeta().getDisplayName());
+                Player player2 = Bukkit.getPlayer((String)string3);
+                if (player2 != null && player2.isOnline()) {
+                    this.plugin.invites().invite(player, player2, string);
                 } else {
-                    p.sendMessage(plugin.msg("prefix") + "§c该玩家不在线。");
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u8be5\u73a9\u5bb6\u4e0d\u5728\u7ebf\u3002");
                 }
             }
             return;
         }
-
-        if (gh.type == Type.ROOM) {
-            // 房间列表: 点击加入/退出房间; 底部按钮创建/邀请/返回
-            e.setCancelled(true);
-            if (raw < 0 || raw >= top.getSize()) return;
-            if (raw == RoomGui.CREATE_SLOT) {
-                // 创建房间 (自动命名 room_N)
-                plugin.cmd().createRoomFor(p, null);
+        if (guiHolder.type == Type.ROOM) {
+            GameManager gameManager;
+            inventoryClickEvent.setCancelled(true);
+            if (n < 0 || n >= inventory.getSize()) {
                 return;
             }
-            if (raw == RoomGui.INVITE_SLOT) {
-                // 打开邀请面板 (邀请到自己报名的房间, 无则 default)
-                String myRoom = plugin.rooms().defaultRoom().roomId();
-                for (GameManager g : plugin.rooms().joinedRooms(p.getUniqueId())) { myRoom = g.roomId(); break; }
-                plugin.inviteGui().open(p, myRoom);
+            if (n == 28) {
+                this.plugin.cmd().createRoomFor(player, null);
                 return;
             }
-            if (raw == RoomGui.BACK_SLOT) {
-                plugin.menus().open(p);
-                return;
-            }
-            if (raw == RoomGui.CLOSE_SLOT) {
-                p.closeInventory();
-                return;
-            }
-            // 点击房间条目 → 加入/退出报名
-            ItemStack it = e.getCurrentItem();
-            if (it == null || it.getType() == Material.AIR) return;
-            String nm = org.bukkit.ChatColor.stripColor(it.getItemMeta().getDisplayName());
-            // 名字形如 "房间 <id>" 或 "§a房间 §f<id>" → 取 id
-            String roomId = nm.replace("房间", "").trim();
-            if (!roomId.isEmpty()) {
-                GameManager g = plugin.rooms().get(roomId);
-                if (g != null) {
-                    if (g.isInGame(p.getUniqueId())) g.leave(p);
-                    else g.join(p);
-                    plugin.roomGui().render(p, top, gh); // 刷新
+            if (n == 30) {
+                String string = this.plugin.rooms().defaultRoom().roomId();
+                Iterator<GameManager> iterator = this.plugin.rooms().joinedRooms(player.getUniqueId()).iterator();
+                if (iterator.hasNext()) {
+                    GameManager gameManager2 = iterator.next();
+                    string = gameManager2.roomId();
                 }
+                this.plugin.inviteGui().open(player, string);
+                return;
+            }
+            if (n == 22) {
+                this.plugin.menus().open(player);
+                return;
+            }
+            if (n == 49) {
+                player.closeInventory();
+                return;
+            }
+            ItemStack itemStack = inventoryClickEvent.getCurrentItem();
+            if (itemStack == null || itemStack.getType() == Material.AIR) {
+                return;
+            }
+            String string = ChatColor.stripColor((String)itemStack.getItemMeta().getDisplayName());
+            String string4 = string.replace("\u623f\u95f4", "").trim();
+            if (!string4.isEmpty() && (gameManager = this.plugin.rooms().get(string4)) != null) {
+                if (gameManager.isInGame(player.getUniqueId())) {
+                    gameManager.leave(player);
+                } else {
+                    gameManager.join(player);
+                }
+                this.plugin.roomGui().render(player, inventory, guiHolder);
             }
             return;
         }
-
-        // SELL
-        if (raw < top.getSize()) {
-            // 上区: 按钮槽禁止动, 其余自由放取
-            if (raw == SellGui.CONFIRM_SLOT) {
-                e.setCancelled(true);
-                if (e.getClick().isLeftClick() || e.getClick().isRightClick()) {
-                    plugin.sells().settle(p, top);
-                    refreshSellInfo(top);
+        if (n < inventory.getSize()) {
+            if (n == 49) {
+                inventoryClickEvent.setCancelled(true);
+                if (inventoryClickEvent.getClick().isLeftClick() || inventoryClickEvent.getClick().isRightClick()) {
+                    this.plugin.sells().settle(player, inventory);
+                    this.refreshSellInfo(inventory);
                 }
                 return;
             }
-            if (raw >= 45) e.setCancelled(true);
-            return;
-        }
-        // 下区(背包): 放行
-    }
-
-    private void refreshSellInfo(Inventory top) {
-        long total = 0;
-        int items = 0;
-        Map<String, Double> prices = plugin.sellPrices();
-        for (int slot = 0; slot < 45; slot++) {
-            ItemStack it = top.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            Double price = prices.get(it.getType().name());
-            if (price != null && price > 0) {
-                total += (long) Math.floor(price * it.getAmount());
-                items += it.getAmount();
+            if (n >= 45) {
+                inventoryClickEvent.setCancelled(true);
             }
-        }
-        ItemStack confirm = top.getItem(SellGui.CONFIRM_SLOT);
-        if (confirm != null && confirm.getItemMeta() != null) {
-            var meta = confirm.getItemMeta();
-            meta.setDisplayName("§a§l确认出售");
-            meta.setLore(java.util.Arrays.asList(
-                    "§7待回收: §e" + items + " 件",
-                    "§7预计获得: §e" + total + " 元",
-                    "", "§e点击结算"));
-            confirm.setItemMeta(meta);
+            return;
         }
     }
 
-    /** 工作台材料放置槽 */
-    private boolean isCraftMatSlot(int raw) {
-        for (int s : CraftGui.MAT_SLOTS) if (raw == s) return true;
+    private void refreshSellInfo(Inventory inventory) {
+        ItemStack itemStack;
+        long l = 0L;
+        int n = 0;
+        Map<String, Double> map = this.plugin.sellPrices();
+        for (int i = 0; i < 45; ++i) {
+            Double d;
+            itemStack = inventory.getItem(i);
+            if (itemStack == null || itemStack.getType().isAir() || (d = map.get(itemStack.getType().name())) == null || !(d > 0.0)) continue;
+            l += (long)Math.floor(d * (double)itemStack.getAmount());
+            n += itemStack.getAmount();
+        }
+        ItemStack itemStack2 = inventory.getItem(49);
+        if (itemStack2 != null && itemStack2.getItemMeta() != null) {
+            itemStack = itemStack2.getItemMeta();
+            itemStack.setDisplayName("\u00a7a\u00a7l\u786e\u8ba4\u51fa\u552e");
+            itemStack.setLore(Arrays.asList("\u00a77\u5f85\u56de\u6536: \u00a7e" + n + " \u4ef6", "\u00a77\u9884\u8ba1\u83b7\u5f97: \u00a7e" + l + " \u5143", "", "\u00a7e\u70b9\u51fb\u7ed3\u7b97"));
+            itemStack2.setItemMeta((ItemMeta)itemStack);
+        }
+    }
+
+    private boolean isCraftMatSlot(int n) {
+        for (int n2 : CraftGui.MAT_SLOTS) {
+            if (n != n2) continue;
+            return true;
+        }
         return false;
     }
 
-    private void sendDistribution(Player p) {
-        var counts = plugin.boxes().countByRarity();
-        p.sendMessage(plugin.msg("prefix") + "§e地图物资箱分布 (共 §a" + plugin.boxes().count() + "§e 个):");
-        for (Rarity r : Rarity.values()) {
-            p.sendMessage(" §7" + r.display + ": " + r.colorCode.replace('&', '\u00A7') + counts.getOrDefault(r, 0) + " 个");
+    private void sendDistribution(Player player) {
+        Map<Rarity, Integer> map = this.plugin.boxes().countByRarity();
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u5730\u56fe\u7269\u8d44\u7bb1\u5206\u5e03 (\u5171 \u00a7a" + this.plugin.boxes().count() + "\u00a7e \u4e2a):");
+        for (Rarity rarity : Rarity.values()) {
+            player.sendMessage(" \u00a77" + rarity.display + ": " + rarity.colorCode.replace('&', '\u00a7') + String.valueOf(map.getOrDefault((Object)rarity, 0)) + " \u4e2a");
         }
-        p.sendMessage(plugin.msg("prefix") + "§7下一波空投: §d约 " + (plugin.airdrops().secondsUntilNext() / 60 + 1) + " 分钟后");
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u4e0b\u4e00\u6ce2\u7a7a\u6295: \u00a7d\u7ea6 " + (this.plugin.airdrops().secondsUntilNext() / 60L + 1L) + " \u5206\u949f\u540e");
     }
 
-    /** 选择地形并切换当前对局世界 (管理员用) */
-    /** 加入指定模式的对局房间 (单人/PVP/组队), 绑定当前 arena 世界 */
-    private void joinMode(Player p, GameManager.Mode mode) {
-        String roomId = switch (mode) {
-            case SOLO -> "solo";
-            case TEAM -> "team";
+    private void joinMode(Player player, GameManager.Mode mode) {
+        String string = switch (mode) {
+            case GameManager.Mode.SOLO -> "solo";
+            case GameManager.Mode.TEAM -> "team";
             default -> "pvp";
         };
-        // 创建/获取该模式房间 (绑定当前 arena 世界名)
-        String worldName = plugin.worlds().world() != null ? plugin.worlds().world().getName() : null;
-        GameManager room = plugin.rooms().createRoom(roomId, worldName);
-        room.toggleJoin(p);
-        // 刷新 GUI 显示报名状态
-        p.closeInventory();
-        plugin.gameGui().open(p);
+        String string2 = this.plugin.worlds().world() != null ? this.plugin.worlds().world().getName() : null;
+        GameManager gameManager = this.plugin.rooms().createRoom(string, string2);
+        gameManager.toggleJoin(player);
+        player.closeInventory();
+        this.plugin.gameGui().open(player);
     }
 
-    private void selectTerrain(Player p, TerrainType type) {
-        if (!p.hasPermission("terrabox.admin")) {
-            p.sendMessage(plugin.msg("no-permission"));
+    private void selectTerrain(Player player, TerrainType terrainType) {
+        if (!player.hasPermission("terrabox.admin")) {
+            player.sendMessage(this.plugin.msg("no-permission"));
             return;
         }
-        boolean ok = plugin.arenas().selectByTerrain(type);
-        if (ok) {
-            String name = plugin.arenas().current() != null ? plugin.arenas().current().getName() : type.display;
-            p.sendMessage(plugin.msg("prefix") + "§a已选择地形: " + type.colorCode + type.display
-                    + " §7(世界: §e" + name + "§7)");
-            p.sendMessage(plugin.msg("prefix") + "§6正在重新初始化该世界地形与物资箱...");
-            plugin.switchArena();
-            p.sendMessage(plugin.msg("prefix") + "§e地图已就绪, 用 §a/box game start <solo|pvp|team> §e开赛。");
-            p.closeInventory();
+        boolean bl = this.plugin.arenas().selectByTerrain(terrainType);
+        if (bl) {
+            String string = this.plugin.arenas().current() != null ? this.plugin.arenas().current().getName() : terrainType.display;
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u9009\u62e9\u5730\u5f62: " + terrainType.colorCode + terrainType.display + " \u00a77(\u4e16\u754c: \u00a7e" + string + "\u00a77)");
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a76\u6b63\u5728\u91cd\u65b0\u521d\u59cb\u5316\u8be5\u4e16\u754c\u5730\u5f62\u4e0e\u7269\u8d44\u7bb1...");
+            this.plugin.switchArena();
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u5730\u56fe\u5df2\u5c31\u7eea, \u7528 \u00a7a/box game start <solo|pvp|team> \u00a7e\u5f00\u8d5b\u3002");
+            player.closeInventory();
         } else {
-            p.sendMessage(plugin.msg("prefix") + "§c地形世界创建失败, 请检查控制台日志。");
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u5730\u5f62\u4e16\u754c\u521b\u5efa\u5931\u8d25, \u8bf7\u68c0\u67e5\u63a7\u5236\u53f0\u65e5\u5fd7\u3002");
         }
     }
 
-    /** 按当前选定地形额外生成一个新对局世界并加入 (Global 线程调用) */
-    private void createNewTerrainWorld(Player p) {
-        if (!p.hasPermission("terrabox.admin")) {
-            p.sendMessage(plugin.msg("no-permission"));
+    private void createNewTerrainWorld(Player player) {
+        if (!player.hasPermission("terrabox.admin")) {
+            player.sendMessage(this.plugin.msg("no-permission"));
             return;
         }
-        // Folia: createNew 内部会调用 createWorld, 必须走 Global 线程
-        final Player player = p;
-        Bukkit.getGlobalRegionScheduler().run(plugin, task -> {
-            try {
-                TerrainType type = TerrainType.DEFAULT;
-                org.bukkit.World w = plugin.arenas().createNewAsyncSafe(type);
-                if (w != null) {
-                    try {
-                        w.setGameRule(org.bukkit.GameRule.DO_DAYLIGHT_CYCLE, false);
-                        w.setTime(6000);
-                    } catch (Throwable ignored) {}
-                    plugin.arenas().select(w.getName());
-                    // 回到玩家线程发送消息
-                    org.bukkit.Location loc = player.getLocation();
-                    Bukkit.getRegionScheduler().run(plugin, loc, t -> {
-                        player.sendMessage(plugin.msg("prefix") + "§a已生成新对局世界: §e" + w.getName());
-                        player.closeInventory();
-                    });
-                } else {
-                    player.sendMessage(plugin.msg("prefix") + "§c新对局世界创建失败。");
+        TerrainType terrainType = TerrainType.DEFAULT;
+        String string = "default";
+        World world = this.plugin.arenas().createNew(TerrainType.parse(string));
+        if (world != null) {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    world.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, (Object)false);
+                    world.setTime(6000L);
                 }
-            } catch (Throwable e) {
-                player.sendMessage(plugin.msg("prefix") + "§c世界创建异常: " + e.getMessage());
-            }
-        });
-    }
-
-    @EventHandler
-    public void onDrag(InventoryDragEvent e) {
-        Inventory top = e.getView().getTopInventory();
-        GuiHolder gh = holderOf(top);
-        if (gh == null) return;
-        if (gh.type == Type.MENU || gh.type == Type.TERRAIN || gh.type == Type.GAME) {
-            e.setCancelled(true);
-            return;
-        }
-        if (gh.type == Type.CRAFT) {
-            // 工作台: 全面禁止拖拽(材料只能用点击放入/取出, 防拖拽导致材料丢失/复制)。
-            // 拖拽涉及任何槽位(材料槽/按钮/背包)一律取消。
-            e.setCancelled(true);
-            return;
-        }
-        if (gh.type == Type.ARTIFACT) {
-            // 神器图鉴: 全部只读, 禁止任何拖动
-            e.setCancelled(true);
-            return;
-        }
-        if (gh.type == Type.INVITE || gh.type == Type.ROOM) {
-            // 邀请面板 / 房间列表: 全只读, 禁止拖动
-            e.setCancelled(true);
-            return;
-        }
-        // SELL: 允许在背包(>=top.size)与上区 0..44(除确认按钮)之间拖放; 触及按钮区一律取消。
-        for (int raw : e.getRawSlots()) {
-            if (raw >= top.getSize()) continue;                        // 玩家背包, 放行
-            if (raw >= 0 && raw < 45 && raw != SellGui.CONFIRM_SLOT) continue; // 合法上区
-            e.setCancelled(true);                                       // 按钮/说明等取消
-            return;
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                this.plugin.arenas().select(world.getName());
+            });
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u751f\u6210\u65b0\u5bf9\u5c40\u4e16\u754c: \u00a7e" + world.getName());
+            player.closeInventory();
+        } else {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u65b0\u5bf9\u5c40\u4e16\u754c\u521b\u5efa\u5931\u8d25\u3002");
         }
     }
 
     @EventHandler
-    public void onClose(InventoryCloseEvent e) {
-        if (!(e.getPlayer() instanceof Player p)) return;
-        GuiHolder gh = holderOf(e.getInventory());
-        if (gh == null) return;
-        if (gh.type == Type.SELL) {
-            // 玩家区域线程: 退回未出售物品
-            plugin.sells().returnItems(p, e.getInventory());
+    public void onDrag(InventoryDragEvent inventoryDragEvent) {
+        Inventory inventory = inventoryDragEvent.getView().getTopInventory();
+        GuiHolder guiHolder = this.holderOf(inventory);
+        if (guiHolder == null) {
+            return;
         }
-        if (gh.type == Type.CRAFT) {
-            // 工作台关闭: 材料槽中的碎片/材料退回背包
-            for (int slot : CraftGui.MAT_SLOTS) {
-                ItemStack it = e.getInventory().getItem(slot);
-                if (it == null || it.getType().isAir()) continue;
-                var m = p.getInventory().addItem(it);
-                for (ItemStack r : m.values()) p.getWorld().dropItemNaturally(p.getLocation(), r);
-                e.getInventory().setItem(slot, null);
+        if (guiHolder.type == Type.MENU || guiHolder.type == Type.TERRAIN || guiHolder.type == Type.GAME) {
+            inventoryDragEvent.setCancelled(true);
+            return;
+        }
+        if (guiHolder.type == Type.CRAFT) {
+            inventoryDragEvent.setCancelled(true);
+            return;
+        }
+        if (guiHolder.type == Type.ARTIFACT) {
+            inventoryDragEvent.setCancelled(true);
+            return;
+        }
+        if (guiHolder.type == Type.INVITE || guiHolder.type == Type.ROOM) {
+            inventoryDragEvent.setCancelled(true);
+            return;
+        }
+        Iterator iterator = inventoryDragEvent.getRawSlots().iterator();
+        while (iterator.hasNext()) {
+            int n = (Integer)iterator.next();
+            if (n >= inventory.getSize() || n >= 0 && n < 45 && n != 49) continue;
+            inventoryDragEvent.setCancelled(true);
+            return;
+        }
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent inventoryCloseEvent) {
+        Object object = inventoryCloseEvent.getPlayer();
+        if (!(object instanceof Player)) {
+            return;
+        }
+        Player player = (Player)object;
+        object = this.holderOf(inventoryCloseEvent.getInventory());
+        if (object == null) {
+            return;
+        }
+        if (object.type == Type.SELL) {
+            this.plugin.sells().returnItems(player, inventoryCloseEvent.getInventory());
+        }
+        if (object.type == Type.CRAFT) {
+            for (int n : CraftGui.MAT_SLOTS) {
+                ItemStack itemStack = inventoryCloseEvent.getInventory().getItem(n);
+                if (itemStack == null || itemStack.getType().isAir()) continue;
+                HashMap hashMap = player.getInventory().addItem(new ItemStack[]{itemStack});
+                for (ItemStack itemStack2 : hashMap.values()) {
+                    player.getWorld().dropItemNaturally(player.getLocation(), itemStack2);
+                }
+                inventoryCloseEvent.getInventory().setItem(n, null);
             }
         }
+    }
+
+    public static class GuiHolder
+    implements InventoryHolder {
+        public final Type type;
+        public Inventory inv;
+        public int craftIndex = 0;
+        public String inviteRoom = null;
+
+        public GuiHolder(Type type) {
+            this.type = type;
+        }
+
+        public Inventory getInventory() {
+            return this.inv;
+        }
+    }
+
+    static enum Type {
+        MENU,
+        SELL,
+        TERRAIN,
+        GAME,
+        CRAFT,
+        ARTIFACT,
+        INVITE,
+        ROOM;
+
     }
 }

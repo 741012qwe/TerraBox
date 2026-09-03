@@ -1,17 +1,61 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  org.bukkit.Bukkit
+ *  org.bukkit.GameMode
+ *  org.bukkit.Location
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.block.Chest
+ *  org.bukkit.entity.Entity
+ *  org.bukkit.entity.HumanEntity
+ *  org.bukkit.entity.Player
+ *  org.bukkit.event.EventHandler
+ *  org.bukkit.event.EventPriority
+ *  org.bukkit.event.Listener
+ *  org.bukkit.event.block.BlockBreakEvent
+ *  org.bukkit.event.block.BlockExplodeEvent
+ *  org.bukkit.event.block.BlockPistonExtendEvent
+ *  org.bukkit.event.block.BlockPistonRetractEvent
+ *  org.bukkit.event.entity.EntityDamageByEntityEvent
+ *  org.bukkit.event.entity.EntityExplodeEvent
+ *  org.bukkit.event.entity.PlayerDeathEvent
+ *  org.bukkit.event.inventory.InventoryCloseEvent
+ *  org.bukkit.event.inventory.InventoryMoveItemEvent
+ *  org.bukkit.event.inventory.InventoryOpenEvent
+ *  org.bukkit.event.player.PlayerJoinEvent
+ *  org.bukkit.event.player.PlayerQuitEvent
+ *  org.bukkit.event.player.PlayerRespawnEvent
+ *  org.bukkit.inventory.InventoryHolder
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
+import com.terrabox.BoxManager;
+import com.terrabox.GameManager;
+import com.terrabox.PlayerStore;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
@@ -26,295 +70,289 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 游戏事件 (白皮书 §6.1): 每个事件在所属区域线程触发, 区域内方块/实体直接操作合法
- *  - 开箱: 统计 + 高稀有度广播 + 计分板记录
- *  - 搬空: 拆箱 + 异地补货
- *  - 保护: 禁破坏/禁漏斗/禁爆炸/禁活塞
- *  - 出生: 新玩家/非对局玩家 → 大厅; 对局内死亡淘汰/击杀统计
- */
-public class GameListener implements Listener {
+public class GameListener
+implements Listener {
     private final TerraBoxPlugin plugin;
-    // 记录玩家最近死亡位置 (用于淘汰玩家重生到死亡点旁观, 而非原版出生点)
-    private final java.util.Map<UUID, Location> lastDeathLoc = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastDeathLoc = new ConcurrentHashMap<UUID, Location>();
 
-    public GameListener(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public GameListener(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    // ==================== 开箱 ====================
-
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onOpen(InventoryOpenEvent e) {
-        InventoryHolder holder = e.getInventory().getHolder();
-        if (!(holder instanceof Chest chest)) return;
-        org.bukkit.Location loc = chest.getLocation();
-        Bukkit.getRegionScheduler().run(plugin, loc, task -> {
-            BoxManager.BoxEntry entry = plugin.boxes().registeredAt(chest.getBlock());
-            if (entry == null) return;
-            if (e.getPlayer() instanceof Player p) {
-                PlayerStore.PlayerData d = plugin.players().getOrCreate(p.getUniqueId(), p.getName());
-                d.addOpened(entry.rarity);
-                if (entry.airdrop) d.airdropLooted.incrementAndGet();
-                // 计分板记录开箱数
-                if (plugin.rooms().isRunning() && plugin.rooms().isInGame(p.getUniqueId())) {
-                    plugin.scoreboard().recordBox(p.getUniqueId());
-                }
-                boolean broadcast = entry.rarity == Rarity.MYTHIC
-                        && plugin.getConfig().getBoolean("boxes.broadcast-mythic", true);
-                if (broadcast) {
-                    Bukkit.getGlobalRegionScheduler().execute(plugin, () ->
-                            Bukkit.broadcast(plugin.component("open-broadcast",
-                                    "{player}", p.getName(),
-                                    "{rarity}", "§d§l" + entry.rarity.display)));
-                }
-            }
-        });
-    }
-
-    @EventHandler
-    public void onClose(InventoryCloseEvent e) {
-        InventoryHolder holder = e.getInventory().getHolder();
-        if (!(holder instanceof Chest chest)) return;
-        org.bukkit.Location loc = chest.getLocation();
-        Bukkit.getRegionScheduler().run(plugin, loc, task -> {
-            BoxManager.BoxEntry entry = plugin.boxes().registeredAt(chest.getBlock());
-            if (entry == null) return;
-            if (e.getInventory().isEmpty()) {
-                plugin.boxes().handleChestEmptied(chest.getBlock(), entry);
-                if (e.getPlayer() instanceof Player p) {
-                    p.sendMessage(plugin.msg("box-emptied-self"));
-                }
-            }
-        });
-    }
-
-    // ==================== 保护 ====================
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBreak(BlockBreakEvent e) {
-        if (!plugin.getConfig().getBoolean("boxes.protect-break", true)) return;
-        if (isBoxWorld(e.getBlock().getWorld().getName()) && plugin.boxes().registeredAt(e.getBlock()) != null) {
-            if (e.getPlayer().hasPermission("terrabox.admin")
-                    && e.getPlayer().isSneaking()) return;
-            e.setCancelled(true);
-            e.getPlayer().sendMessage(plugin.msg("protected-block"));
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onMoveItem(InventoryMoveItemEvent e) {
-        if (!plugin.getConfig().getBoolean("boxes.protect-hopper", true)) return;
-        if (e.getSource() == null) return;
-        InventoryHolder holder = e.getSource().getHolder();
-        if (holder instanceof Chest chest) {
-            if (plugin.boxes().registeredAt(chest.getBlock()) != null) {
-                e.setCancelled(true);
-            }
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onEntityExplode(EntityExplodeEvent e) {
-        e.blockList().removeIf(b -> isProtectedBox(b));
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onBlockExplode(BlockExplodeEvent e) {
-        e.blockList().removeIf(b -> isProtectedBox(b));
-    }
-
-    private boolean isProtectedBox(Block b) {
-        if (b.getType() != Material.CHEST) return false;
-        return plugin.boxes().registeredAt(b) != null;
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onPistonExtend(BlockPistonExtendEvent e) {
-        for (Block b : e.getBlocks()) {
-            if (b.getType() == Material.CHEST && plugin.boxes().registeredAt(b) != null) {
-                e.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onPistonRetract(BlockPistonRetractEvent e) {
-        for (Block b : e.getBlocks()) {
-            if (b.getType() == Material.CHEST && plugin.boxes().registeredAt(b) != null) {
-                e.setCancelled(true);
-                return;
-            }
-        }
-    }
-
-    // ==================== 出生 ====================
-
-    @EventHandler
-    public void onJoin(PlayerJoinEvent e) {
-        Player p = e.getPlayer();
-        UUID uuid = p.getUniqueId();
-        PlayerStore.PlayerData d = plugin.players().getOrCreate(uuid, p.getName());
-        plugin.players().loadAsync(uuid, p.getName(), () -> {
-            p.getScheduler().runDelayed(plugin, task -> {
-                if (d.isNew()) {
-                    double start = plugin.getConfig().getDouble("economy.start-money", 0);
-                    if (start > 0 && !plugin.econ().useVault()) d.addMoney(start);
-                }
-                // 对局玩家(参战且未淘汰)重连 → 传回对局世界; 其余所有情况(淘汰/退出/非对局) → 大厅
-                if (plugin.rooms().isInGame(uuid)) {
-                    World arena = plugin.worlds().world();
-                    if (arena != null && !p.getWorld().getName().equals(arena.getName())) {
-                        p.teleportAsync(plugin.spawnArea().spawnPointFor(0, 1));
-                    }
-                } else {
-                    // 淘汰/退出/非对局玩家一律送回大厅 (防止滞留对局世界)
-                    World lobby = plugin.worlds().lobby();
-                    if (lobby != null && !p.getWorld().getName().equals(lobby.getName())) {
-                        p.teleportAsync(plugin.lobbyBuilder().spawnLocation());
-                    }
-                }
-            }, () -> {}, 30L);
-        });
-    }
-
-    @EventHandler
-    public void onQuit(PlayerQuitEvent e) {
-        Player p = e.getPlayer();
-        UUID uuid = p.getUniqueId();
-        // 对局中(含淘汰/参战)玩家退出: 自动清空背包数据 (防止对局物品被带离)
-        if (plugin.rooms().isRunning() && plugin.rooms().inGamePlayers().contains(uuid)) {
-            try { p.getInventory().clear(); } catch (Throwable ignored) {}
-        }
-        plugin.players().saveAndUnload(uuid);
-        plugin.rooms().onPlayerQuit(uuid);
-        // 清理该玩家的房间邀请
-        plugin.invites().clear(uuid);
-    }
-
-    // ==================== 对局 ====================
-
-    /**
-     * 玩家死亡事件: 取消死亡, 改为满血后自动切换旁观模式
-     * 玩家可选择 /box lobby 返回大厅 或 /box spectate 继续旁观
-     */
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
-    public void onDeath(PlayerDeathEvent e) {
-        Player p = e.getEntity();
-        if (!plugin.rooms().isInGame(p.getUniqueId())) return; // 仅对局内玩家
-        if (!plugin.rooms().isRunning()) return; // 对局未开始不处理
-
-        // 取消死亡: 满血 + 清除死亡掉落
-        e.setCancelled(true);
-        p.setHealth(20.0);
-        p.setFoodLevel(20);
-        p.clearActivePotionEffects();
-        e.setDroppedExp(0);
-        e.setDeathMessage(null);
-
-        // 记录死亡位置 (用于旁观起点)
-        try {
-            lastDeathLoc.put(p.getUniqueId(), p.getLocation().clone());
-        } catch (Throwable ignored) {}
-
-        // 标记为淘汰（但不阻止重生）
-        plugin.rooms().onPlayerDeath(p, null);
-
-        // 立即切换到旁观模式, 避免原版死亡动画/重生流程
-        p.setGameMode(org.bukkit.GameMode.SPECTATOR);
-        p.sendMessage(plugin.msg("prefix") + "§e你已受伤倒地, 进入旁观模式!");
-        p.sendMessage(plugin.msg("prefix") + "§7输入 §a/box lobby §7返回大厅, 或 §f/box spectate §7继续旁观。");
-    }
-
-    /** PvP 伤害控制: 仅对局世界生效; SOLO 禁互伤; TEAM 同队免伤; 需双方都在本房间对局内 */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onDamage(EntityDamageByEntityEvent e) {
-        if (!(e.getEntity() instanceof Player victim)) return;
-        if (!(e.getDamager() instanceof Player damager)) return;
-        if (!isBoxWorld(victim.getWorld().getName())) return;
-        // 找到受害玩家所属房间 (默认房间)
-        GameManager g = plugin.rooms().roomOf(victim.getUniqueId());
-        if (g == null || !g.isRunning()) return;
-        // 双方都必须正在对局内 (未淘汰), 淘汰/旁观玩家不参与 PVP 结算
-        if (!g.isInGame(damager.getUniqueId()) || !g.isInGame(victim.getUniqueId())) {
-            e.setCancelled(true);
+    @EventHandler(priority=EventPriority.MONITOR, ignoreCancelled=true)
+    public void onOpen(InventoryOpenEvent inventoryOpenEvent) {
+        InventoryHolder inventoryHolder = inventoryOpenEvent.getInventory().getHolder();
+        if (!(inventoryHolder instanceof Chest)) {
             return;
         }
-        // 模式判定: SOLO 禁互伤, TEAM 同队免伤, PVP 正常
-        if (!g.canDamage(damager, victim)) {
-            e.setCancelled(true);
+        Chest chest = (Chest)inventoryHolder;
+        Location location = chest.getLocation();
+        Bukkit.getRegionScheduler().run((Plugin)this.plugin, location, scheduledTask -> {
+            BoxManager.BoxEntry boxEntry = this.plugin.boxes().registeredAt(chest.getBlock());
+            if (boxEntry == null) {
+                return;
+            }
+            Object object = inventoryOpenEvent.getPlayer();
+            if (object instanceof Player) {
+                boolean bl;
+                Player player = (Player)object;
+                object = this.plugin.players().getOrCreate(player.getUniqueId(), player.getName());
+                ((PlayerStore.PlayerData)object).addOpened(boxEntry.rarity);
+                if (boxEntry.airdrop) {
+                    ((PlayerStore.PlayerData)object).airdropLooted.incrementAndGet();
+                }
+                if (this.plugin.rooms().isRunning() && this.plugin.rooms().isInGame(player.getUniqueId())) {
+                    this.plugin.scoreboard().recordBox(player.getUniqueId());
+                }
+                boolean bl2 = bl = boxEntry.rarity == Rarity.MYTHIC && this.plugin.getConfig().getBoolean("boxes.broadcast-mythic", true);
+                if (bl) {
+                    Bukkit.getGlobalRegionScheduler().execute((Plugin)this.plugin, () -> Bukkit.broadcast((Component)this.plugin.component("open-broadcast", "{player}", player.getName(), "{rarity}", "\u00a7d\u00a7l" + boxEntry.rarity.display)));
+                }
+            }
+        });
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent inventoryCloseEvent) {
+        InventoryHolder inventoryHolder = inventoryCloseEvent.getInventory().getHolder();
+        if (!(inventoryHolder instanceof Chest)) {
+            return;
+        }
+        Chest chest = (Chest)inventoryHolder;
+        Location location = chest.getLocation();
+        Bukkit.getRegionScheduler().run((Plugin)this.plugin, location, scheduledTask -> {
+            BoxManager.BoxEntry boxEntry = this.plugin.boxes().registeredAt(chest.getBlock());
+            if (boxEntry == null) {
+                return;
+            }
+            if (inventoryCloseEvent.getInventory().isEmpty()) {
+                this.plugin.boxes().handleChestEmptied(chest.getBlock(), boxEntry);
+                HumanEntity humanEntity = inventoryCloseEvent.getPlayer();
+                if (humanEntity instanceof Player) {
+                    Player player = (Player)humanEntity;
+                    player.sendMessage(this.plugin.msg("box-emptied-self"));
+                }
+            }
+        });
+    }
+
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onBreak(BlockBreakEvent blockBreakEvent) {
+        if (!this.plugin.getConfig().getBoolean("boxes.protect-break", true)) {
+            return;
+        }
+        if (this.isBoxWorld(blockBreakEvent.getBlock().getWorld().getName()) && this.plugin.boxes().registeredAt(blockBreakEvent.getBlock()) != null) {
+            if (blockBreakEvent.getPlayer().hasPermission("terrabox.admin") && blockBreakEvent.getPlayer().isSneaking()) {
+                return;
+            }
+            blockBreakEvent.setCancelled(true);
+            blockBreakEvent.getPlayer().sendMessage(this.plugin.msg("protected-block"));
+        }
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void onMoveItem(InventoryMoveItemEvent inventoryMoveItemEvent) {
+        if (!this.plugin.getConfig().getBoolean("boxes.protect-hopper", true)) {
+            return;
+        }
+        if (inventoryMoveItemEvent.getSource() == null) {
+            return;
+        }
+        InventoryHolder inventoryHolder = inventoryMoveItemEvent.getSource().getHolder();
+        if (inventoryHolder instanceof Chest) {
+            Chest chest = (Chest)inventoryHolder;
+            if (this.plugin.boxes().registeredAt(chest.getBlock()) != null) {
+                inventoryMoveItemEvent.setCancelled(true);
+            }
+        }
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void onEntityExplode(EntityExplodeEvent entityExplodeEvent) {
+        entityExplodeEvent.blockList().removeIf(block -> this.isProtectedBox((Block)block));
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void onBlockExplode(BlockExplodeEvent blockExplodeEvent) {
+        blockExplodeEvent.blockList().removeIf(block -> this.isProtectedBox((Block)block));
+    }
+
+    private boolean isProtectedBox(Block block) {
+        if (block.getType() != Material.CHEST) {
+            return false;
+        }
+        return this.plugin.boxes().registeredAt(block) != null;
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void onPistonExtend(BlockPistonExtendEvent blockPistonExtendEvent) {
+        for (Block block : blockPistonExtendEvent.getBlocks()) {
+            if (block.getType() != Material.CHEST || this.plugin.boxes().registeredAt(block) == null) continue;
+            blockPistonExtendEvent.setCancelled(true);
+            return;
+        }
+    }
+
+    @EventHandler(ignoreCancelled=true)
+    public void onPistonRetract(BlockPistonRetractEvent blockPistonRetractEvent) {
+        for (Block block : blockPistonRetractEvent.getBlocks()) {
+            if (block.getType() != Material.CHEST || this.plugin.boxes().registeredAt(block) == null) continue;
+            blockPistonRetractEvent.setCancelled(true);
+            return;
         }
     }
 
     @EventHandler
-    public void onRespawn(PlayerRespawnEvent e) {
-        Player p = e.getPlayer();
-        UUID u = p.getUniqueId();
-        // 玩家所属房间 (可能是非默认房间 — 多房间对局)
-        GameManager g = plugin.rooms().roomOf(u);
-        boolean eliminated = plugin.rooms().isEliminated(u);
-        World lobby = plugin.worlds().lobby();
-
-        // --- 淘汰玩家: 对局运行中 → 重生到死亡位置并自动旁观; 对局结束 → 重生到大厅 ---
-        if (eliminated) {
-            if (g != null && g.isRunning()) {
-                World w = g.roomWorld();
-                Location death = lastDeathLoc.get(u);
-                Location base;
-                if (death != null && w != null && death.getWorld() != null
-                        && death.getWorld().getName().equals(w.getName())) {
-                    // 重生在同一世界 XZ 的死亡点, Y 抬升至安全高度(不卡地形)
-                    base = death.clone();
-                    base.setY(Math.max(base.getY(), 60) + 3);
-                } else {
-                    base = w != null ? w.getSpawnLocation() : p.getWorld().getSpawnLocation();
-                    base.setY(Math.max(base.getY(), 60) + 3);
+    public void onJoin(PlayerJoinEvent playerJoinEvent) {
+        Player player = playerJoinEvent.getPlayer();
+        UUID uUID = player.getUniqueId();
+        PlayerStore.PlayerData playerData = this.plugin.players().getOrCreate(uUID, player.getName());
+        this.plugin.players().loadAsync(uUID, player.getName(), () -> player.getScheduler().runDelayed((Plugin)this.plugin, scheduledTask -> {
+            double d;
+            if (playerData.isNew() && (d = this.plugin.getConfig().getDouble("economy.start-money", 0.0)) > 0.0 && !this.plugin.econ().useVault()) {
+                playerData.addMoney(d);
+            }
+            if (this.plugin.rooms().isInGame(uUID)) {
+                World world = this.plugin.worlds().world();
+                if (world != null && !player.getWorld().getName().equals(world.getName())) {
+                    player.teleportAsync(this.plugin.spawnArea().spawnPointFor(0, 1));
                 }
-                e.setRespawnLocation(base);
-                // 重生后自动进入旁观者模式 (留在死亡处观战)
-                plugin.rooms().autoSpectateAfterDeath(p);
             } else {
-                // 对局已结束 → 重生到大厅正常生存
-                if (lobby != null) {
-                    e.setRespawnLocation(lobby.getSpawnLocation());
-                    p.getScheduler().run(plugin, t -> plugin.rooms().sendToLobby(p), () -> {});
+                World world = this.plugin.worlds().lobby();
+                if (world != null && !player.getWorld().getName().equals(world.getName())) {
+                    player.teleportAsync(this.plugin.lobbyBuilder().spawnLocation());
                 }
+            }
+        }, () -> {}, 30L));
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent playerQuitEvent) {
+        Player player = playerQuitEvent.getPlayer();
+        UUID uUID = player.getUniqueId();
+        if (this.plugin.rooms().isRunning() && this.plugin.rooms().inGamePlayers().contains(uUID)) {
+            try {
+                player.getInventory().clear();
+            }
+            catch (Throwable throwable) {
+                // empty catch block
+            }
+        }
+        this.plugin.players().saveAndUnload(uUID);
+        this.plugin.rooms().onPlayerQuit(uUID);
+        this.plugin.invites().clear(uUID);
+    }
+
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=false)
+    public void onDeath(PlayerDeathEvent playerDeathEvent) {
+        Player player = playerDeathEvent.getEntity();
+        if (!this.plugin.rooms().isInGame(player.getUniqueId())) {
+            return;
+        }
+        if (!this.plugin.rooms().isRunning()) {
+            return;
+        }
+        playerDeathEvent.setCancelled(true);
+        player.setHealth(20.0);
+        player.setFoodLevel(20);
+        player.clearActivePotionEffects();
+        playerDeathEvent.setDroppedExp(0);
+        playerDeathEvent.setDeathMessage(null);
+        try {
+            this.lastDeathLoc.put(player.getUniqueId(), player.getLocation().clone());
+        }
+        catch (Throwable throwable) {
+            // empty catch block
+        }
+        this.plugin.rooms().onPlayerDeath(player, null);
+        player.setGameMode(GameMode.SPECTATOR);
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u4f60\u5df2\u53d7\u4f24\u5012\u5730, \u8fdb\u5165\u65c1\u89c2\u6a21\u5f0f!");
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u8f93\u5165 \u00a7a/box lobby \u00a77\u8fd4\u56de\u5927\u5385, \u6216 \u00a7f/box spectate \u00a77\u7ee7\u7eed\u65c1\u89c2\u3002");
+    }
+
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onDamage(EntityDamageByEntityEvent entityDamageByEntityEvent) {
+        Entity entity = entityDamageByEntityEvent.getEntity();
+        if (!(entity instanceof Player)) {
+            return;
+        }
+        Player player = (Player)entity;
+        Object object = entityDamageByEntityEvent.getDamager();
+        if (!(object instanceof Player)) {
+            return;
+        }
+        entity = (Player)object;
+        if (!this.isBoxWorld(player.getWorld().getName())) {
+            return;
+        }
+        object = this.plugin.rooms().roomOf(player.getUniqueId());
+        if (object == null || !((GameManager)object).isRunning()) {
+            return;
+        }
+        if (!((GameManager)object).isInGame(entity.getUniqueId()) || !((GameManager)object).isInGame(player.getUniqueId())) {
+            entityDamageByEntityEvent.setCancelled(true);
+            return;
+        }
+        if (!((GameManager)object).canDamage((Player)entity, player)) {
+            entityDamageByEntityEvent.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onRespawn(PlayerRespawnEvent playerRespawnEvent) {
+        Player player = playerRespawnEvent.getPlayer();
+        UUID uUID = player.getUniqueId();
+        GameManager gameManager = this.plugin.rooms().roomOf(uUID);
+        boolean bl = this.plugin.rooms().isEliminated(uUID);
+        World world = this.plugin.worlds().lobby();
+        if (bl) {
+            if (gameManager != null && gameManager.isRunning()) {
+                Location location;
+                World world2 = gameManager.roomWorld();
+                Location location2 = this.lastDeathLoc.get(uUID);
+                if (location2 != null && world2 != null && location2.getWorld() != null && location2.getWorld().getName().equals(world2.getName())) {
+                    location = location2.clone();
+                    location.setY(Math.max(location.getY(), 60.0) + 3.0);
+                } else {
+                    location = world2 != null ? world2.getSpawnLocation() : player.getWorld().getSpawnLocation();
+                    location.setY(Math.max(location.getY(), 60.0) + 3.0);
+                }
+                playerRespawnEvent.setRespawnLocation(location);
+                this.plugin.rooms().autoSpectateAfterDeath(player);
+            } else if (world != null) {
+                playerRespawnEvent.setRespawnLocation(world.getSpawnLocation());
+                player.getScheduler().run((Plugin)this.plugin, scheduledTask -> this.plugin.rooms().sendToLobby(player), () -> {});
             }
             return;
         }
-
-        // --- 对局运行中且未淘汰(SOLO等) → 重生回出生广场防卡 ---
-        if (g != null && g.isRunning() && plugin.rooms().isInGame(u)) {
-            World w = g.roomWorld();
-            org.bukkit.Location safe = (w != null ? w.getSpawnLocation() : p.getWorld().getSpawnLocation()).clone();
-            safe.setY(Math.max(safe.getY(), 80) + 3);
-            e.setRespawnLocation(safe);
+        if (gameManager != null && gameManager.isRunning() && this.plugin.rooms().isInGame(uUID)) {
+            World world3 = gameManager.roomWorld();
+            Location location = (world3 != null ? world3.getSpawnLocation() : player.getWorld().getSpawnLocation()).clone();
+            location.setY(Math.max(location.getY(), 80.0) + 3.0);
+            playerRespawnEvent.setRespawnLocation(location);
             return;
         }
-
-        // --- 玩家当前在对局世界, 但对局已结束/空闲 → 重生到大厅 (防止滞留对局世界) ---
-        if (isArenaWorld(p.getWorld()) && lobby != null) {
-            e.setRespawnLocation(lobby.getSpawnLocation());
-            p.getScheduler().run(plugin, t -> plugin.rooms().sendToLobby(p), () -> {});
+        if (this.isArenaWorld(player.getWorld()) && world != null) {
+            playerRespawnEvent.setRespawnLocation(world.getSpawnLocation());
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> this.plugin.rooms().sendToLobby(player), () -> {});
             return;
         }
-
-        // 其余情况按 spawn.on-respawn 配置处理
-        if (!plugin.getConfig().getBoolean("spawn.on-respawn", false)) return;
-        p.getScheduler().runDelayed(plugin, task ->
-                        plugin.spawns().spawnPlayer(p, false), () -> {}, 15L);
+        if (!this.plugin.getConfig().getBoolean("spawn.on-respawn", false)) {
+            return;
+        }
+        player.getScheduler().runDelayed((Plugin)this.plugin, scheduledTask -> this.plugin.spawns().spawnPlayer(player, false), () -> {}, 15L);
     }
 
-    /** 是否对局世界 (arena_* 或主资源世界) */
-    private boolean isArenaWorld(World w) {
-        if (w == null) return false;
-        return w.getName().startsWith("arena");
+    private boolean isArenaWorld(World world) {
+        if (world == null) {
+            return false;
+        }
+        return world.getName().startsWith("arena");
     }
 
-    /** 是否为对局世界 (arena_*或主资源世界) */
-    private boolean isBoxWorld(String name) {
-        return name.startsWith("arena") || name.equals(plugin.getConfig().getString("world.name", "resource_land"));
+    private boolean isBoxWorld(String string) {
+        return string.startsWith("arena") || string.equals(this.plugin.getConfig().getString("world.name", "resource_land"));
     }
 }

@@ -1,62 +1,79 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  net.kyori.adventure.text.Component
+ *  org.bukkit.Bukkit
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
-
 import java.util.concurrent.atomic.AtomicLong;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 定时空投: 间隔投放高稀有度物资箱 + 全服广播坐标, 制造全服争夺玩法
- * 线程模型: GlobalRegionScheduler 检查时机; 投放由 BoxManager 的区域调度链完成
- */
 public class AirdropService {
     private final TerraBoxPlugin plugin;
     private ScheduledTask task;
     private final AtomicLong nextAt = new AtomicLong();
 
-    public AirdropService(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public AirdropService(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
     public void start() {
-        if (!plugin.getConfig().getBoolean("airdrop.enabled", true)) return;
-        long intervalMs = Math.max(1, plugin.getConfig().getLong("airdrop.interval-minutes", 20)) * 60_000L;
-        nextAt.set(System.currentTimeMillis() + intervalMs / 2); // 启动后半个周期投第一波
-        task = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), 20L * 30, 20L * 30);
+        if (!this.plugin.getConfig().getBoolean("airdrop.enabled", true)) {
+            return;
+        }
+        long l = Math.max(1L, this.plugin.getConfig().getLong("airdrop.interval-minutes", 20L)) * 60000L;
+        this.nextAt.set(System.currentTimeMillis() + l / 2L);
+        this.task = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.tick(), 600L, 600L);
     }
 
     public void shutdown() {
-        if (task != null) task.cancel();
+        if (this.task != null) {
+            this.task.cancel();
+        }
     }
 
     private void tick() {
-        if (System.currentTimeMillis() < nextAt.get()) return;
-        long intervalMs = Math.max(1, plugin.getConfig().getLong("airdrop.interval-minutes", 20)) * 60_000L;
-        nextAt.set(System.currentTimeMillis() + intervalMs);
-        dropNow(null);
+        if (System.currentTimeMillis() < this.nextAt.get()) {
+            return;
+        }
+        long l = Math.max(1L, this.plugin.getConfig().getLong("airdrop.interval-minutes", 20L)) * 60000L;
+        this.nextAt.set(System.currentTimeMillis() + l);
+        this.dropNow(null);
     }
 
-    /** 立即空投 (管理命令 / 定时), after 在区域线程回调 */
-    public void dropNow(Runnable after) {
-        if (plugin.worlds().world() == null) return;
-        String rname = plugin.getConfig().getString("airdrop.rarity", "LEGENDARY");
-        Rarity rarity = Rarity.parse(rname);
-        if (rarity == null) rarity = Rarity.LEGENDARY;
-        Rarity fr = rarity;
-        plugin.boxes().spawnRandomBox(fr, true, entry -> {
-            if (entry == null) return;
-            if (plugin.getConfig().getBoolean("boxes.broadcast-airdrop", true)) {
-                Bukkit.getGlobalRegionScheduler().execute(plugin, () ->
-                        Bukkit.broadcast(plugin.component("airdrop-placed",
-                                "{world}", plugin.worlds().world() != null ? plugin.worlds().world().getName() : "?",
-                                "{x}", String.valueOf(entry.x),
-                                "{z}", String.valueOf(entry.z))));
+    public void dropNow(Runnable runnable) {
+        if (this.plugin.worlds().world() == null) {
+            return;
+        }
+        String string = this.plugin.getConfig().getString("airdrop.rarity", "LEGENDARY");
+        Rarity rarity = Rarity.parse(string);
+        if (rarity == null) {
+            rarity = Rarity.LEGENDARY;
+        }
+        Rarity rarity2 = rarity;
+        this.plugin.boxes().spawnRandomBox(rarity2, true, boxEntry -> {
+            if (boxEntry == null) {
+                return;
             }
-            if (after != null) after.run();
+            if (this.plugin.getConfig().getBoolean("boxes.broadcast-airdrop", true)) {
+                Bukkit.getGlobalRegionScheduler().execute((Plugin)this.plugin, () -> Bukkit.broadcast((Component)this.plugin.component("airdrop-placed", "{world}", this.plugin.worlds().world() != null ? this.plugin.worlds().world().getName() : "?", "{x}", String.valueOf(boxEntry.x), "{z}", String.valueOf(boxEntry.z))));
+            }
+            if (runnable != null) {
+                runnable.run();
+            }
         });
     }
 
     public long secondsUntilNext() {
-        return Math.max(0, (nextAt.get() - System.currentTimeMillis()) / 1000);
+        return Math.max(0L, (this.nextAt.get() - System.currentTimeMillis()) / 1000L);
     }
 }

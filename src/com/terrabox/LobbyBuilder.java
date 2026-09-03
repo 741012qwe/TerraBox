@@ -1,111 +1,139 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Location
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.entity.Player
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.TerraBoxPlugin;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.AbstractMap;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 大厅世界 (terra_lobby, 512x512): 玩家聚集地 / 自动生成
- *
- * 结构:
- *  - 中心大型石砖广场平台 (垫高到基准高度, 玩家聚集)
- *  - 平台边缘玻璃围栏 (防跌落)
- *  - 世界外围屏障 (barrier) 墙 + 底部基岩填充, 防止离开大厅
- *  - 中心建筑: 出生点 + 信息公告牌 + 对局入口按钮
- *
- * 线程模型: 与 WorldDecorator 一致 — 全局驱动队列, 区块任务 force load 后
- *   在 RegionScheduler 区域线程铺方块。
- */
 public class LobbyBuilder {
     private final TerraBoxPlugin plugin;
     private volatile int centerY = 64;
     private volatile World lobby;
-    private final java.util.concurrent.atomic.AtomicBoolean building = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final AtomicBoolean building = new AtomicBoolean(false);
 
-    public LobbyBuilder(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public LobbyBuilder(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
     public World lobby() {
-        // 从 WorldService 获取
-        return plugin.worlds().lobby();
+        return this.plugin.worlds().lobby();
     }
 
     public int centerY() {
-        return centerY;
+        return this.centerY;
     }
 
-    /** 异步构建大厅 (任意线程, 不阻塞); done 在 Global 线程回调 */
-    public void build(Runnable done) {
-        World w = lobby();
-        if (w == null) { if (done != null) done.run(); return; }
-        if (!building.compareAndSet(false, true)) {
-            if (done != null) done.run();
+    public void build(Runnable runnable) {
+        int n;
+        int n2;
+        int n3;
+        int n4;
+        int n5;
+        World world = this.lobby();
+        if (world == null) {
+            if (runnable != null) {
+                runnable.run();
+            }
             return;
         }
-
-        int radius = Math.max(8, plugin.getConfig().getInt("lobby.platform-radius", 24));
-        int half = (int) plugin.worlds().lobbyHalf(); // 512/2
-        // 规划任务: 中心平台(半径 radius 内区块), 外围屏障墙(四周), 底部基岩
-        java.util.Set<java.util.Map.Entry<Integer, Integer>> tasks = new java.util.HashSet<>();
-
-        // 中心平台覆盖区块
-        int c0 = (int) Math.floor(-radius / 16.0), c1 = (int) Math.ceil(radius / 16.0);
-        for (int cx = c0; cx < c1; cx++) {
-            for (int cz = c0; cz < c1; cz++) tasks.add(new java.util.AbstractMap.SimpleEntry<>(cx, cz));
+        if (!this.building.compareAndSet(false, true)) {
+            if (runnable != null) {
+                runnable.run();
+            }
+            return;
         }
-        // 建筑 (直径比平台小一点): 用一个额外区块覆盖
-        int b0 = (int) Math.floor(-(radius + 1) / 16.0), b1 = (int) Math.ceil((radius + 1) / 16.0);
-        for (int cx = b0; cx < b1; cx++) {
-            for (int cz = b0; cz < b1; cz++) tasks.add(new java.util.AbstractMap.SimpleEntry<>(cx, cz));
+        int n6 = Math.max(8, this.plugin.getConfig().getInt("lobby.platform-radius", 24));
+        int n7 = (int)this.plugin.worlds().lobbyHalf();
+        HashSet<AbstractMap.SimpleEntry<Integer, Integer>> hashSet = new HashSet<AbstractMap.SimpleEntry<Integer, Integer>>();
+        int n8 = (int)Math.floor((double)(-n6) / 16.0);
+        int n9 = (int)Math.ceil((double)n6 / 16.0);
+        for (n5 = n8; n5 < n9; ++n5) {
+            for (n4 = n8; n4 < n9; ++n4) {
+                hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n5, n4));
+            }
         }
-        // 外围屏障墙区块 (四周一圈)
-        int wMin = (int) Math.floor(-half / 16.0), wMax = (int) Math.ceil(half / 16.0);
-        for (int c = wMin; c < wMax; c++) {
-            tasks.add(new java.util.AbstractMap.SimpleEntry<>(c, wMin)); // 南
-            tasks.add(new java.util.AbstractMap.SimpleEntry<>(c, wMax - 1)); // 北
-            tasks.add(new java.util.AbstractMap.SimpleEntry<>(wMin, c)); // 西
-            tasks.add(new java.util.AbstractMap.SimpleEntry<>(wMax - 1, c)); // 东
+        n5 = (int)Math.floor((double)(-(n6 + 1)) / 16.0);
+        n4 = (int)Math.ceil((double)(n6 + 1) / 16.0);
+        for (n3 = n5; n3 < n4; ++n3) {
+            for (n2 = n5; n2 < n4; ++n2) {
+                hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n3, n2));
+            }
         }
-
-        plugin.getLogger().info("开始构建大厅: " + tasks.size() + " 个区块任务");
-        final int batch = Math.max(2, plugin.getConfig().getInt("lobby.batch-per-tick", 8));
-        final java.util.ArrayDeque<java.util.Map.Entry<Integer, Integer>> queue =
-                new java.util.ArrayDeque<>(tasks);
-        final World fw = w;
-
-        // 先加载所有相关区块 (异步), 再铺方块 — 分批
-        ScheduledTask driver = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> {
-            if (queue.isEmpty()) {
-                t.cancel();
-                building.set(false);
-                centerY = computeCenterY(fw);
-                plugin.getLogger().info("大厅构建完成: 中心 y=" + centerY);
-                if (done != null) done.run();
+        n3 = (int)Math.floor((double)(-n7) / 16.0);
+        n2 = (int)Math.ceil((double)n7 / 16.0);
+        for (n = n3; n < n2; ++n) {
+            hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n, n3));
+            hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n, n2 - 1));
+            hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n3, n));
+            hashSet.add(new AbstractMap.SimpleEntry<Integer, Integer>(n2 - 1, n));
+        }
+        this.plugin.getLogger().info("\u5f00\u59cb\u6784\u5efa\u5927\u5385: " + hashSet.size() + " \u4e2a\u533a\u5757\u4efb\u52a1");
+        n = Math.max(2, this.plugin.getConfig().getInt("lobby.batch-per-tick", 8));
+        ArrayDeque arrayDeque = new ArrayDeque(hashSet);
+        World world2 = world;
+        ScheduledTask scheduledTask2 = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> {
+            if (arrayDeque.isEmpty()) {
+                scheduledTask.cancel();
+                this.building.set(false);
+                this.centerY = this.computeCenterY(world2);
+                this.plugin.getLogger().info("\u5927\u5385\u6784\u5efa\u5b8c\u6210: \u4e2d\u5fc3 y=" + this.centerY);
+                if (runnable != null) {
+                    runnable.run();
+                }
                 return;
             }
-            for (int i = 0; i < batch && !queue.isEmpty(); i++) {
-                var task = queue.poll();
-                int cx = task.getKey(), cz = task.getValue();
-                fw.getChunkAtAsync(cx, cz).whenComplete((chunk, err) -> {
-                    if (err != null) {
-                        plugin.getLogger().warning("大厅区块加载失败 (" + cx + "," + cz + "): " + err);
+            for (int i = 0; i < n && !arrayDeque.isEmpty(); ++i) {
+                Map.Entry entry = (Map.Entry)arrayDeque.poll();
+                int n4 = (Integer)entry.getKey();
+                int n5 = (Integer)entry.getValue();
+                world2.getChunkAtAsync(n4, n5).whenComplete((chunk, throwable) -> {
+                    if (throwable != null) {
+                        this.plugin.getLogger().warning("\u5927\u5385\u533a\u5757\u52a0\u8f7d\u5931\u8d25 (" + n4 + "," + n5 + "): " + String.valueOf(throwable));
                         return;
                     }
-                    Bukkit.getGlobalRegionScheduler().run(plugin, tt -> {
-                        try { fw.setChunkForceLoaded(cx, cz, true); } catch (Throwable ignored) {}
-                        Bukkit.getRegionScheduler().run(plugin, fw, cx, cz, task2 -> {
+                    Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                        try {
+                            world2.setChunkForceLoaded(n4, n5, true);
+                        }
+                        catch (Throwable throwable) {
+                            // empty catch block
+                        }
+                        Bukkit.getRegionScheduler().run((Plugin)this.plugin, world2, n4, n5, scheduledTask -> {
                             try {
-                                buildPlatform(fw, cx, cz, radius);
-                                buildWall(fw, cx, cz, half);
-                            } catch (Throwable ex) {
-                                plugin.getLogger().warning("大厅构建异常 (" + cx + "," + cz + "): " + ex);
-                            } finally {
-                                try { fw.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
+                                this.buildPlatform(world2, n4, n5, n6);
+                                this.buildWall(world2, n4, n5, n7);
+                            }
+                            catch (Throwable throwable) {
+                                this.plugin.getLogger().warning("\u5927\u5385\u6784\u5efa\u5f02\u5e38 (" + n4 + "," + n5 + "): " + String.valueOf(throwable));
+                            }
+                            finally {
+                                try {
+                                    world2.setChunkForceLoaded(n4, n5, false);
+                                }
+                                catch (Throwable throwable) {}
                             }
                         });
                     });
@@ -114,91 +142,95 @@ public class LobbyBuilder {
         }, 20L, 8L);
     }
 
-    /** 区域线程: 铺中心平台 (垫高到基准高度 + 边缘玻璃围栏) */
-    private void buildPlatform(World w, int cx, int cz, int radius) {
-        int base = plugin.getConfig().getInt("lobby.platform-y", 64);
-        int r2 = (radius * radius + radius + 1);
-        int r2edge = (radius + 1) * (radius + 1);
-        for (int bx = 0; bx < 16; bx++) {
-            for (int bz = 0; bz < 16; bz++) {
-                int x = cx * 16 + bx, z = cz * 16 + bz;
-                if (x * x + z * z <= r2) {
-                    // 平台: 底部基岩, 上填平整, 表面石砖
-                    for (int y = 1; y <= base; y++) {
-                        Block b = w.getBlockAt(x, y, z);
-                        if (y <= 2) b.setType(Material.BEDROCK, false);
-                        else if (y < base) b.setType(Material.STONE, false);
-                        else b.setType(Material.STONE_BRICKS, false);
-                    }
-                    // 表面以上清空 (防残留植被)
-                    Block above = w.getBlockAt(x, base + 1, z);
-                    if (!above.getType().isAir() && !above.getType().name().contains("GLASS")
-                            && !above.getType().name().contains("BARRIER")) {
-                        above.setType(Material.AIR, false);
-                    }
-                    // 平台边缘一圈玻璃围栏 (防跌落平台 → 虚空)
-                    if (x * x + z * z > (radius - 1) * (radius - 1) + 1) {
-                        for (int h = 1; h <= 2; h++) {
-                            Block gl = w.getBlockAt(x, base + h, z);
-                            if (gl.getType().isAir()) gl.setType(Material.GLASS, false);
+    private void buildPlatform(World world, int n, int n2, int n3) {
+        int n4 = this.plugin.getConfig().getInt("lobby.platform-y", 64);
+        int n5 = n3 * n3 + n3 + 1;
+        int n6 = (n3 + 1) * (n3 + 1);
+        for (int i = 0; i < 16; ++i) {
+            for (int j = 0; j < 16; ++j) {
+                int n7 = n * 16 + i;
+                int n8 = n2 * 16 + j;
+                if (n7 * n7 + n8 * n8 <= n5) {
+                    for (int k = 1; k <= n4; ++k) {
+                        Block block = world.getBlockAt(n7, k, n8);
+                        if (k <= 2) {
+                            block.setType(Material.BEDROCK, false);
+                            continue;
                         }
+                        if (k < n4) {
+                            block.setType(Material.STONE, false);
+                            continue;
+                        }
+                        block.setType(Material.STONE_BRICKS, false);
                     }
+                    Block block = world.getBlockAt(n7, n4 + 1, n8);
+                    if (!(block.getType().isAir() || block.getType().name().contains("GLASS") || block.getType().name().contains("BARRIER"))) {
+                        block.setType(Material.AIR, false);
+                    }
+                    if (n7 * n7 + n8 * n8 <= (n3 - 1) * (n3 - 1) + 1) continue;
+                    for (int k = 1; k <= 2; ++k) {
+                        Block block2 = world.getBlockAt(n7, n4 + k, n8);
+                        if (!block2.getType().isAir()) continue;
+                        block2.setType(Material.GLASS, false);
+                    }
+                    continue;
                 }
-                // 平台外 (界内但半径外): 留空 (虚空视觉, 玩家掉下平台坠向虚空重生)
-                else if (x * x + z * z <= r2edge) {
-                    for (int y = 1; y <= base; y++) {
-                        Block b = w.getBlockAt(x, y, z);
-                        if (b.getType() != Material.AIR) b.setType(Material.AIR, false);
-                    }
-                }
-            }
-        }
-    }
-
-    /** 区域线程: 外围屏障墙 + 底部基岩 (防止离开大厅) */
-    private void buildWall(World w, int cx, int cz, int half) {
-        int base = plugin.getConfig().getInt("lobby.platform-y", 64);
-        for (int bx = 0; bx < 16; bx++) {
-            for (int bz = 0; bz < 16; bz++) {
-                int x = cx * 16 + bx, z = cz * 16 + bz;
-                boolean boundary = Math.abs(x) >= half - 2 || Math.abs(z) >= half - 2;
-                if (boundary) {
-                    // 屏障墙: 从底部到高空全填 barrier, 防止离开
-                    for (int y = 1; y < w.getMaxHeight(); y++) {
-                        w.getBlockAt(x, y, z).setType(Material.BARRIER, false);
-                    }
-                } else if (Math.abs(x) == half - 3 || Math.abs(z) == half - 3) {
-                    // 内侧环形: 检视玻璃围栏 (距边界3格, 提示边界)
-                    for (int y = base; y <= base + 3; y++) {
-                        w.getBlockAt(x, y, z).setType(Material.GLASS, false);
-                    }
+                if (n7 * n7 + n8 * n8 > n6) continue;
+                for (int k = 1; k <= n4; ++k) {
+                    Block block = world.getBlockAt(n7, k, n8);
+                    if (block.getType() == Material.AIR) continue;
+                    block.setType(Material.AIR, false);
                 }
             }
         }
     }
 
-    /** 计算大厅中心高度 (不读世界, 直接用配置基准, 避免 Global 线程异步读区块) */
-    private int computeCenterY(World w) {
-        return plugin.getConfig().getInt("lobby.platform-y", 64) + 1;
+    private void buildWall(World world, int n, int n2, int n3) {
+        int n4 = this.plugin.getConfig().getInt("lobby.platform-y", 64);
+        for (int i = 0; i < 16; ++i) {
+            for (int j = 0; j < 16; ++j) {
+                int n5;
+                boolean bl;
+                int n6 = n * 16 + i;
+                int n7 = n2 * 16 + j;
+                boolean bl2 = bl = Math.abs(n6) >= n3 - 2 || Math.abs(n7) >= n3 - 2;
+                if (bl) {
+                    for (n5 = 1; n5 < world.getMaxHeight(); ++n5) {
+                        world.getBlockAt(n6, n5, n7).setType(Material.BARRIER, false);
+                    }
+                    continue;
+                }
+                if (Math.abs(n6) != n3 - 3 && Math.abs(n7) != n3 - 3) continue;
+                for (n5 = n4; n5 <= n4 + 3; ++n5) {
+                    world.getBlockAt(n6, n5, n7).setType(Material.GLASS, false);
+                }
+            }
+        }
+    }
+
+    private int computeCenterY(World world) {
+        return this.plugin.getConfig().getInt("lobby.platform-y", 64) + 1;
     }
 
     public Location spawnLocation() {
-        World w = lobby();
-        if (w == null) return null;
-        int y = plugin.getConfig().getInt("lobby.platform-y", 64) + 1;
-        return new Location(w, 0.5, y, 0.5);
+        World world = this.lobby();
+        if (world == null) {
+            return null;
+        }
+        int n = this.plugin.getConfig().getInt("lobby.platform-y", 64) + 1;
+        return new Location(world, 0.5, (double)n, 0.5);
     }
 
-    /** 大厅坠落保护: 定期把掉入虚空/平台以下的玩家传回大厅出生点 */
     public void startSafetyWatch() {
-        int platformY = plugin.getConfig().getInt("lobby.platform-y", 64);
-        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> {
-            World w = lobby();
-            if (w == null) return;
-            for (Player p : w.getPlayers()) {
-                if (p.getLocation().getY() < platformY - 2) {
-                    p.teleportAsync(spawnLocation());
-                }
+        int n = this.plugin.getConfig().getInt("lobby.platform-y", 64);
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> {
+            World world = this.lobby();
+            if (world == null) {
+                return;
+            }
+            for (Player player : world.getPlayers()) {
+                if (!(player.getLocation().getY() < (double)(n - 2))) continue;
+                player.teleportAsync(this.spawnLocation());
             }
         }, 20L, 20L);
     }

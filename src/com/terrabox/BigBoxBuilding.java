@@ -1,171 +1,204 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.format.TextColor
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.block.BlockState
+ *  org.bukkit.block.Chest
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.Chest;
+import org.bukkit.plugin.Plugin;
 
-import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
-
-/**
- * 大型物资建筑 / 物资聚集点:
- *  - 在地图关键位置 (随机选址) 建造一个石砖建筑, 内部布置多个高稀有度物资箱
- *  - "大箱子" 概念: 建筑内多个箱子集中, 玩家探索争夺
- *  - 建筑自动规划: 固定建筑 + 随机散布建筑
- *
- * 线程模型: 与 WorldDecorator 一致 — 区块任务 force load 后在 RegionScheduler 铺方块。
- */
 public class BigBoxBuilding {
     private final TerraBoxPlugin plugin;
 
-    public BigBoxBuilding(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public BigBoxBuilding(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    /** 在地图内随机一个开阔位置建造一座物资建筑 (异步, fire-and-forget) */
-    public void buildRandom(World w) {
-        int half = (int) plugin.worlds().borderHalf();
-        int pad = Math.max(24, plugin.getConfig().getInt("boxes.edge-padding", 24));
-        int limit = Math.max(48, half - pad);
-        for (int attempt = 0; attempt < 12; attempt++) {
-            int x = ThreadLocalRandom.current().nextInt(-limit, limit);
-            int z = ThreadLocalRandom.current().nextInt(-limit, limit);
-            if (Math.hypot(x, z) < 60) continue; // 离中心太近, 留给出生广场
-            final int fx = x, fz = z;
-            int cx = x >> 4, cz = z >> 4;
-            // 异步加载候选区块, 在区域线程内检测开阔地 + 建造 (避免同步 getHighestBlockYAt 跨区块 syncLoad 阻塞触发 Watchdog)
-            w.getChunkAtAsync(cx, cz).whenComplete((chunk, err) -> {
-                if (err != null) return;
-                Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                    try { w.setChunkForceLoaded(cx, cz, true); } catch (Throwable ignored) {}
-                    Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
+    public void buildRandom(World world) {
+        int n = (int)this.plugin.worlds().borderHalf();
+        int n2 = Math.max(24, this.plugin.getConfig().getInt("boxes.edge-padding", 24));
+        int n3 = Math.max(48, n - n2);
+        for (int i = 0; i < 12; ++i) {
+            int n4;
+            int n5 = ThreadLocalRandom.current().nextInt(-n3, n3);
+            if (Math.hypot(n5, n4 = ThreadLocalRandom.current().nextInt(-n3, n3)) < 60.0) continue;
+            int n6 = n5;
+            int n7 = n4;
+            int n8 = n5 >> 4;
+            int n9 = n4 >> 4;
+            world.getChunkAtAsync(n8, n9).whenComplete((chunk, throwable) -> {
+                if (throwable != null) {
+                    return;
+                }
+                Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                    try {
+                        world.setChunkForceLoaded(n8, n9, true);
+                    }
+                    catch (Throwable throwable) {
+                        // empty catch block
+                    }
+                    Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, n8, n9, scheduledTask -> {
                         try {
-                            if (!openArea(w, fx, fz)) return;
-                            build(w, fx, fz);
-                        } catch (Throwable ex) {
-                            plugin.getLogger().warning("大型物资建筑建造异常: " + ex);
-                        } finally {
-                            try { w.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
+                            if (!this.openArea(world, n6, n7)) {
+                                return;
+                            }
+                            this.build(world, n6, n7);
+                        }
+                        catch (Throwable throwable) {
+                            this.plugin.getLogger().warning("\u5927\u578b\u7269\u8d44\u5efa\u7b51\u5efa\u9020\u5f02\u5e38: " + String.valueOf(throwable));
+                        }
+                        finally {
+                            try {
+                                world.setChunkForceLoaded(n8, n9, false);
+                            }
+                            catch (Throwable throwable) {}
                         }
                     });
                 });
             });
-            return; // 一次只尝试一座 (fire-and-forget)
+            return;
         }
     }
 
-    /** 开阔地校验 (区域线程, 已 force load 目标区块): 8x8 高度差 <=4, 跨区块访问异常降级为不平坦 */
-    private boolean openArea(World w, int x, int z) {
+    private boolean openArea(World world, int n, int n2) {
         try {
-            int c = w.getHighestBlockYAt(x, z);
-            for (int dx = -4; dx <= 4; dx++) {
-                for (int dz = -4; dz <= 4; dz++) {
-                    int y = w.getHighestBlockYAt(x + dx, z + dz);
-                    if (Math.abs(y - c) > 4) return false;
+            int n3 = world.getHighestBlockYAt(n, n2);
+            for (int i = -4; i <= 4; ++i) {
+                for (int j = -4; j <= 4; ++j) {
+                    int n4 = world.getHighestBlockYAt(n + i, n2 + j);
+                    if (Math.abs(n4 - n3) <= 4) continue;
+                    return false;
                 }
             }
             return true;
-        } catch (Throwable t) {
+        }
+        catch (Throwable throwable) {
             return false;
         }
     }
 
-    /** 建造一座 9x9 石砖建筑, 内部放置 4~6 个物资箱 (区域线程) */
-    public void build(World w, int orgX, int orgZ) {
-        int y0 = w.getHighestBlockYAt(orgX, orgZ) + 1;
-        int size = 9;
-        int half = size / 2;
-
-        // 地基 (9x9)
-        for (int dx = -half; dx <= half; dx++) {
-            for (int dz = -half; dz <= half; dz++) {
-                w.getBlockAt(orgX + dx, y0, orgZ + dz).setType(Material.STONE_BRICKS, false);
+    public void build(World world, int n, int n2) {
+        int n3;
+        int n4;
+        int n5;
+        int n6;
+        int n7 = world.getHighestBlockYAt(n, n2) + 1;
+        int n8 = 9;
+        int n9 = n8 / 2;
+        for (n6 = -n9; n6 <= n9; ++n6) {
+            for (n5 = -n9; n5 <= n9; ++n5) {
+                world.getBlockAt(n + n6, n7, n2 + n5).setType(Material.STONE_BRICKS, false);
             }
         }
-        // 墙体: 四周一圈 3 格高, 留一个门洞 (南墙中央)
-        for (int h = 1; h <= 3; h++) {
-            for (int dx = -half; dx <= half; dx++) {
-                for (int dz = -half; dz <= half; dz++) {
-                    boolean edge = Math.abs(dx) == half || Math.abs(dz) == half;
-                    if (!edge) continue;
-                    boolean door = (dz == half && dx == 0 && h <= 2);
-                    if (door) {
-                        if (h <= 2) w.getBlockAt(orgX + dx, y0 + h, orgZ + dz).setType(Material.AIR, false);
+        for (n6 = 1; n6 <= 3; ++n6) {
+            for (n5 = -n9; n5 <= n9; ++n5) {
+                for (n4 = -n9; n4 <= n9; ++n4) {
+                    boolean bl;
+                    boolean bl2 = bl = Math.abs(n5) == n9 || Math.abs(n4) == n9;
+                    if (!bl) continue;
+                    int n10 = n3 = n4 == n9 && n5 == 0 && n6 <= 2 ? 1 : 0;
+                    if (n3 != 0) {
+                        if (n6 > 2) continue;
+                        world.getBlockAt(n + n5, n7 + n6, n2 + n4).setType(Material.AIR, false);
                         continue;
                     }
-                    w.getBlockAt(orgX + dx, y0 + h, orgZ + dz).setType(Material.STONE_BRICKS, false);
+                    world.getBlockAt(n + n5, n7 + n6, n2 + n4).setType(Material.STONE_BRICKS, false);
                 }
             }
         }
-        // 屋顶: 顶格铺满, 中央留通光
-        for (int dx = -half; dx <= half; dx++) {
-            for (int dz = -half; dz <= half; dz++) {
-                if (Math.abs(dx) == 0 && Math.abs(dz) == 0) continue;
-                w.getBlockAt(orgX + dx, y0 + 4, orgZ + dz).setType(Material.STONE_BRICKS, false);
+        for (n6 = -n9; n6 <= n9; ++n6) {
+            for (n5 = -n9; n5 <= n9; ++n5) {
+                if (Math.abs(n6) == 0 && Math.abs(n5) == 0) continue;
+                world.getBlockAt(n + n6, n7 + 4, n2 + n5).setType(Material.STONE_BRICKS, false);
             }
         }
-        // 室内火把照明 (四角)
-        for (int[] c : new int[][]{{-half + 1, -half + 1}, {half - 1, -half + 1},
-                {-half + 1, half - 1}, {half - 1, half - 1}}) {
-            w.getBlockAt(orgX + c[0], y0 + 1, orgZ + c[1]).setType(Material.TORCH, false);
+        int[][] nArrayArray = new int[][]{{-n9 + 1, -n9 + 1}, {n9 - 1, -n9 + 1}, {-n9 + 1, n9 - 1}, {n9 - 1, n9 - 1}};
+        n5 = nArrayArray.length;
+        for (n4 = 0; n4 < n5; ++n4) {
+            int[] nArray = nArrayArray[n4];
+            world.getBlockAt(n + nArray[0], n7 + 1, n2 + nArray[1]).setType(Material.TORCH, false);
         }
-
-        // 建筑内放置物资箱 (4~6 个, 高稀有度倾向)
-        int boxCount = 4 + ThreadLocalRandom.current().nextInt(3); // 4..6
-        List<Rarity> weights = List.of(
-                plugin.weightedPickForWorld(), plugin.weightedPickForWorld(), plugin.weightedPickForWorld(),
-                plugin.weightedPickForWorld(), plugin.weightedPickForWorld(), plugin.weightedPickForWorld());
-        for (int i = 0; i < boxCount; i++) {
-            int bx = orgX + (ThreadLocalRandom.current().nextInt(-half + 2, half));
-            int bz = orgZ + (ThreadLocalRandom.current().nextInt(-half + 2, half));
-            // 提升建筑内箱子稀有度 (加权到 EPIC/LEGENDARY)
-            Rarity r = upgrade(weights.get(i));
-            // 直接将箱子放在室内 y0+1 高度
-            int cxx = bx >> 4, czz = bz >> 4;
-            World fw = w;
-            int finalBx = bx, finalBz = bz, boxY = y0 + 1;
-            fw.getChunkAtAsync(cxx, czz).whenComplete((chunk, err) -> {
-                if (err != null) return;
-                Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                    try { fw.setChunkForceLoaded(cxx, czz, true); } catch (Throwable ignored) {}
-                    Bukkit.getRegionScheduler().run(plugin, fw, cxx, czz, task -> {
+        int n11 = 4 + ThreadLocalRandom.current().nextInt(3);
+        List<Rarity> list = List.of(this.plugin.weightedPickForWorld(), this.plugin.weightedPickForWorld(), this.plugin.weightedPickForWorld(), this.plugin.weightedPickForWorld(), this.plugin.weightedPickForWorld(), this.plugin.weightedPickForWorld());
+        for (n4 = 0; n4 < n11; ++n4) {
+            int n12 = n + ThreadLocalRandom.current().nextInt(-n9 + 2, n9);
+            n3 = n2 + ThreadLocalRandom.current().nextInt(-n9 + 2, n9);
+            Rarity rarity = this.upgrade(list.get(n4));
+            int n13 = n12 >> 4;
+            int n14 = n3 >> 4;
+            World world2 = world;
+            int n15 = n12;
+            int n16 = n3;
+            int n17 = n7 + 1;
+            world2.getChunkAtAsync(n13, n14).whenComplete((chunk, throwable) -> {
+                if (throwable != null) {
+                    return;
+                }
+                Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                    try {
+                        world2.setChunkForceLoaded(n13, n14, true);
+                    }
+                    catch (Throwable throwable) {
+                        // empty catch block
+                    }
+                    Bukkit.getRegionScheduler().run((Plugin)this.plugin, world2, n13, n14, scheduledTask -> {
                         try {
-                            Block ground = fw.getBlockAt(finalBx, boxY - 1, finalBz);
-                            Block above = fw.getBlockAt(finalBx, boxY, finalBz);
-                            if (above.getType().isAir() && ground.getType().isSolid()) {
-                                above.setType(Material.CHEST, false);
-                                if (above.getState() instanceof Chest chest) {
-                                    chest.customName(net.kyori.adventure.text.Component.text(
-                                            r.display + "物资箱", r.color));
+                            Block block = world2.getBlockAt(n15, n17 - 1, n16);
+                            Block block2 = world2.getBlockAt(n15, n17, n16);
+                            if (block2.getType().isAir() && block.getType().isSolid()) {
+                                block2.setType(Material.CHEST, false);
+                                BlockState blockState = block2.getState();
+                                if (blockState instanceof Chest) {
+                                    Chest chest = (Chest)blockState;
+                                    chest.customName((Component)Component.text((String)(rarity.display + "\u7269\u8d44\u7bb1"), (TextColor)rarity.color));
                                     chest.update();
-                                    int filled = plugin.loot().fillInventory(
-                                            ((org.bukkit.block.Chest) fw.getBlockAt(finalBx, boxY, finalBz)
-                                                    .getState()).getBlockInventory(), r);
-                                    plugin.getLogger().info("大建筑物资箱: 内部 " + r.display
-                                            + " ×" + finalBx + "," + boxY + "," + finalBz + " 战利品 " + filled + " 堆");
+                                    int n6 = this.plugin.loot().fillInventory(((Chest)world2.getBlockAt(n15, n17, n16).getState()).getBlockInventory(), rarity);
+                                    this.plugin.getLogger().info("\u5927\u5efa\u7b51\u7269\u8d44\u7bb1: \u5185\u90e8 " + rarity.display + " \u00d7" + n15 + "," + n17 + "," + n16 + " \u6218\u5229\u54c1 " + n6 + " \u5806");
                                 }
                             }
-                        } catch (Throwable ex) {
-                            plugin.getLogger().warning("建筑物资箱放置异常: " + ex);
-                        } finally {
-                            try { fw.setChunkForceLoaded(cxx, czz, false); } catch (Throwable ignored) {}
+                        }
+                        catch (Throwable throwable) {
+                            this.plugin.getLogger().warning("\u5efa\u7b51\u7269\u8d44\u7bb1\u653e\u7f6e\u5f02\u5e38: " + String.valueOf(throwable));
+                        }
+                        finally {
+                            try {
+                                world2.setChunkForceLoaded(n13, n14, false);
+                            }
+                            catch (Throwable throwable) {}
                         }
                     });
                 });
             });
         }
-        plugin.getLogger().info("大型物资建筑已建成: (" + orgX + "," + orgZ + ") 室内 " + boxCount + " 箱");
+        this.plugin.getLogger().info("\u5927\u578b\u7269\u8d44\u5efa\u7b51\u5df2\u5efa\u6210: (" + n + "," + n2 + ") \u5ba4\u5185 " + n11 + " \u7bb1");
     }
 
-    /** 屋内箱稀有度提升一档 */
-    private Rarity upgrade(Rarity r) {
-        return switch (r) {
-            case COMMON -> Rarity.RARE;
-            case RARE -> Rarity.EPIC;
-            default -> r;
+    private Rarity upgrade(Rarity rarity) {
+        return switch (rarity) {
+            case Rarity.COMMON -> Rarity.RARE;
+            case Rarity.RARE -> Rarity.EPIC;
+            default -> rarity;
         };
     }
 }

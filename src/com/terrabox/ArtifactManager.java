@@ -1,237 +1,262 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.Registry
+ *  org.bukkit.configuration.ConfigurationSection
+ *  org.bukkit.enchantments.Enchantment
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ *  org.bukkit.persistence.PersistentDataContainer
+ *  org.bukkit.persistence.PersistentDataType
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.Registry;
-
+import com.terrabox.TerraBoxPlugin;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 神器系统 —— 吃鸡模式中的终极装备 (从传说/绝世物资箱低概率掉落)
- *
- * 每件神器: 独特名称/描述, 超强附魔, 属性加成 (攻击伤害/护甲/攻速/移速),
- *   并通过 PDC 标记 terrabox_artifact=key, 供 ArtifactListener 识别额外主动/被动效果。
- *
- * 效果类型 (artifact.<key>.effect):
- *   BLEED       攻击命中概率让目标流血 (持续伤害)
- *   LIFESTEAL   攻击命中回复生命
- *   THORNS      受击反弹伤害
- *   SPEED       被动移速加成
- *   STRENGTH    被动攻击力加成
- *   VAMPIRIC    吸血 (同 LIFESTEAL 更强)
- *   FROST       攻击概率冻结 (减速+发光)
- *
- * 线程模型: 构建物品为纯对象 (任意线程); 效果触发由 ArtifactListener 在实体区域线程处理。
- */
 public class ArtifactManager {
-    public static final String TITLE = "神器";
+    public static final String TITLE = "\u795e\u5668";
     private final TerraBoxPlugin plugin;
     private final NamespacedKey keyArtifact;
     private final NamespacedKey keyEffect;
-    private final Map<String, ArtifactDef> defs = new HashMap<>();
+    private final Map<String, ArtifactDef> defs = new HashMap<String, ArtifactDef>();
 
-    /** 神器定义 */
-    public record ArtifactDef(Material material, String key, String name, List<String> lore,
-                              String effect, double procChance, double magnitude,
-                              Map<Enchantment, Integer> enchants) {}
-
-    public ArtifactManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.keyArtifact = new NamespacedKey(plugin, "artifact");
-        this.keyEffect = new NamespacedKey(plugin, "artifact_effect");
+    public ArtifactManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.keyArtifact = new NamespacedKey((Plugin)terraBoxPlugin, "artifact");
+        this.keyEffect = new NamespacedKey((Plugin)terraBoxPlugin, "artifact_effect");
     }
 
     public void load() {
-        defs.clear();
-        var sec = plugin.getConfig().getConfigurationSection("artifacts");
-        if (sec == null || sec.getKeys(false).isEmpty()) {
-            plugin.getLogger().info("神器表: 未检测到配置段, 已加载内置默认神器");
-            registerDefaults();
+        this.defs.clear();
+        ConfigurationSection configurationSection = this.plugin.getConfig().getConfigurationSection("artifacts");
+        if (configurationSection == null || configurationSection.getKeys(false).isEmpty()) {
+            this.plugin.getLogger().info("\u795e\u5668\u8868: \u672a\u68c0\u6d4b\u5230\u914d\u7f6e\u6bb5, \u5df2\u52a0\u8f7d\u5185\u7f6e\u9ed8\u8ba4\u795e\u5668");
+            this.registerDefaults();
             return;
         }
-        for (String key : sec.getKeys(false)) {
-            var s = sec.getConfigurationSection(key);
-            if (s == null) continue;
+        for (String string : configurationSection.getKeys(false)) {
+            ConfigurationSection configurationSection2 = configurationSection.getConfigurationSection(string);
+            if (configurationSection2 == null) continue;
             try {
-                Material mat = Material.matchMaterial(s.getString("material", "DIAMOND_SWORD").toUpperCase(Locale.ROOT));
-                if (mat == null || !mat.isItem()) {
-                    plugin.getLogger().warning("神器 [" + key + "] 材质无效: " + s.getString("material"));
+                Material material = Material.matchMaterial((String)configurationSection2.getString("material", "DIAMOND_SWORD").toUpperCase(Locale.ROOT));
+                if (material == null || !material.isItem()) {
+                    this.plugin.getLogger().warning("\u795e\u5668 [" + string + "] \u6750\u8d28\u65e0\u6548: " + configurationSection2.getString("material"));
                     continue;
                 }
-                String effect = s.getString("effect", "").toUpperCase(Locale.ROOT);
-                String name = s.getString("name", "&6&l" + key);
-                List<String> lore = new ArrayList<>(s.getStringList("lore"));
-                double procChance = s.getDouble("proc-chance", 0.25);
-                double magnitude = s.getDouble("magnitude", 1.0);
-                // 附魔: 支持内联 map 或字符串 "POWER:5;UNBREAKING:3"
-                Map<Enchantment, Integer> ench = parseEnchants(s.get("enchants"));
-                defs.put(key.toLowerCase(Locale.ROOT),
-                        new ArtifactDef(mat, key.toLowerCase(Locale.ROOT), name, lore,
-                                effect, procChance, magnitude, ench));
-            } catch (Exception e) {
-                plugin.getLogger().warning("神器 [" + key + "] 解析失败: " + e.getMessage());
+                String string2 = configurationSection2.getString("effect", "").toUpperCase(Locale.ROOT);
+                String string3 = configurationSection2.getString("name", "&6&l" + string);
+                ArrayList<String> arrayList = new ArrayList<String>(configurationSection2.getStringList("lore"));
+                double d = configurationSection2.getDouble("proc-chance", 0.25);
+                double d2 = configurationSection2.getDouble("magnitude", 1.0);
+                Map<Enchantment, Integer> map = this.parseEnchants(configurationSection2.get("enchants"));
+                this.defs.put(string.toLowerCase(Locale.ROOT), new ArtifactDef(material, string.toLowerCase(Locale.ROOT), string3, arrayList, string2, d, d2, map));
+            }
+            catch (Exception exception) {
+                this.plugin.getLogger().warning("\u795e\u5668 [" + string + "] \u89e3\u6790\u5931\u8d25: " + exception.getMessage());
             }
         }
-        plugin.getLogger().info("神器表加载完成: " + defs.size() + " 件");
+        this.plugin.getLogger().info("\u795e\u5668\u8868\u52a0\u8f7d\u5b8c\u6210: " + this.defs.size() + " \u4ef6");
     }
 
-    public int size() { return defs.size(); }
+    public int size() {
+        return this.defs.size();
+    }
 
-    /** 内置默认神器 (config 缺失兜底) */
     private void registerDefaults() {
-        defs.put("celestial_blade", new ArtifactDef(Material.NETHERITE_SWORD, "celestial_blade",
-                "&6&l苍穹之刃", List.of("&7传说中斩落星辰的神剑。", "&7攻击吸血, 攻击命中概率让目标流血。"),
-                "LIFESTEAL", 0.30, 1.0, Map.of(e("sharpeness"), 5, e("unbreaking"), 4, e("fire_aspect"), 2)));
-        defs.put("aegis_axe", new ArtifactDef(Material.NETHERITE_AXE, "aegis_axe",
-                "&c&l神盾重斧", List.of("&7一斧可撼动山岳。", "&7高额攻击, 命中概率击退冻结。"),
-                "FROST", 0.35, 1.2, Map.of(e("sharpness"), 5, e("unbreaking"), 4, e("efficiency"), 5)));
-        defs.put("draco_bow", new ArtifactDef(Material.BOW, "draco_bow",
-                "&e&l屠龙圣弓", List.of("&7箭无虚发, 箭箭索命。", "&7射出的箭附带火焰与高额伤害。"),
-                "STRING", 0.40, 1.0, Map.of(e("power"), 5, e("flame"), 2, e("infinity"), 1, e("punch"), 2)));
-        defs.put("titan_chest", new ArtifactDef(Material.NETHERITE_CHESTPLATE, "titan_chest",
-                "&d&l泰坦铠甲", List.of("&7坚不可摧的巨人护甲。", "&7受击反弹伤害, 大幅减伤。"),
-                "THORNS", 0.25, 2.0, Map.of(e("protection"), 5, e("unbreaking"), 4, e("thorns"), 3)));
-        defs.put("wind_boots", new ArtifactDef(Material.NETHERITE_BOOTS, "wind_boots",
-                "&b&l疾风之靴", List.of("&7如风般迅捷。", "&7大幅提升移动速度。"),
-                "SPEED", 0.30, 0.25, Map.of(e("protection"), 4, e("feather_falling"), 4, e("unbreaking"), 4)));
-        defs.put("vampire_fang", new ArtifactDef(Material.NETHERITE_AXE, "vampire_fang",
-                "&d&l吸血獠牙", List.of("&7饮血而猎, 愈战愈勇。", "&7每次攻击吸取大量生命。"),
-                "VAMPIRIC", 0.35, 2.0, Map.of(e("sharpness"), 5, e("unbreaking"), 4, e("looting"), 3)));
+        this.defs.put("celestial_blade", new ArtifactDef(Material.NETHERITE_SWORD, "celestial_blade", "&6&l\u82cd\u7a79\u4e4b\u5203", List.of("&7\u4f20\u8bf4\u4e2d\u65a9\u843d\u661f\u8fb0\u7684\u795e\u5251\u3002", "&7\u653b\u51fb\u5438\u8840, \u653b\u51fb\u547d\u4e2d\u6982\u7387\u8ba9\u76ee\u6807\u6d41\u8840\u3002"), "LIFESTEAL", 0.3, 1.0, Map.of(ArtifactManager.e("sharpeness"), 5, ArtifactManager.e("unbreaking"), 4, ArtifactManager.e("fire_aspect"), 2)));
+        this.defs.put("aegis_axe", new ArtifactDef(Material.NETHERITE_AXE, "aegis_axe", "&c&l\u795e\u76fe\u91cd\u65a7", List.of("&7\u4e00\u65a7\u53ef\u64bc\u52a8\u5c71\u5cb3\u3002", "&7\u9ad8\u989d\u653b\u51fb, \u547d\u4e2d\u6982\u7387\u51fb\u9000\u51bb\u7ed3\u3002"), "FROST", 0.35, 1.2, Map.of(ArtifactManager.e("sharpness"), 5, ArtifactManager.e("unbreaking"), 4, ArtifactManager.e("efficiency"), 5)));
+        this.defs.put("draco_bow", new ArtifactDef(Material.BOW, "draco_bow", "&e&l\u5c60\u9f99\u5723\u5f13", List.of("&7\u7bad\u65e0\u865a\u53d1, \u7bad\u7bad\u7d22\u547d\u3002", "&7\u5c04\u51fa\u7684\u7bad\u9644\u5e26\u706b\u7130\u4e0e\u9ad8\u989d\u4f24\u5bb3\u3002"), "STRING", 0.4, 1.0, Map.of(ArtifactManager.e("power"), 5, ArtifactManager.e("flame"), 2, ArtifactManager.e("infinity"), 1, ArtifactManager.e("punch"), 2)));
+        this.defs.put("titan_chest", new ArtifactDef(Material.NETHERITE_CHESTPLATE, "titan_chest", "&d&l\u6cf0\u5766\u94e0\u7532", List.of("&7\u575a\u4e0d\u53ef\u6467\u7684\u5de8\u4eba\u62a4\u7532\u3002", "&7\u53d7\u51fb\u53cd\u5f39\u4f24\u5bb3, \u5927\u5e45\u51cf\u4f24\u3002"), "THORNS", 0.25, 2.0, Map.of(ArtifactManager.e("protection"), 5, ArtifactManager.e("unbreaking"), 4, ArtifactManager.e("thorns"), 3)));
+        this.defs.put("wind_boots", new ArtifactDef(Material.NETHERITE_BOOTS, "wind_boots", "&b&l\u75be\u98ce\u4e4b\u9774", List.of("&7\u5982\u98ce\u822c\u8fc5\u6377\u3002", "&7\u5927\u5e45\u63d0\u5347\u79fb\u52a8\u901f\u5ea6\u3002"), "SPEED", 0.3, 0.25, Map.of(ArtifactManager.e("protection"), 4, ArtifactManager.e("feather_falling"), 4, ArtifactManager.e("unbreaking"), 4)));
+        this.defs.put("vampire_fang", new ArtifactDef(Material.NETHERITE_AXE, "vampire_fang", "&d&l\u5438\u8840\u7360\u7259", List.of("&7\u996e\u8840\u800c\u730e, \u6108\u6218\u6108\u52c7\u3002", "&7\u6bcf\u6b21\u653b\u51fb\u5438\u53d6\u5927\u91cf\u751f\u547d\u3002"), "VAMPIRIC", 0.35, 2.0, Map.of(ArtifactManager.e("sharpness"), 5, ArtifactManager.e("unbreaking"), 4, ArtifactManager.e("looting"), 3)));
     }
 
-    /** 从 Registry 查附魔 (兜底 SHARPNESS), 避免依赖已移除的静态字段 */
-    private static Enchantment e(String name) {
+    private static Enchantment e(String string) {
         try {
-            Enchantment en = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(name));
-            if (en != null) return en;
-        } catch (Throwable ignored) {}
-        // 兜底: 尝试常见名
-        for (String alt : new String[]{"sharpness", "protection"}) {
+            String[] stringArray = (String[])Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string));
+            if (stringArray != null) {
+                return stringArray;
+            }
+        }
+        catch (Throwable throwable) {
+            // empty catch block
+        }
+        for (String string2 : new String[]{"sharpness", "protection"}) {
             try {
-                Enchantment en = Registry.ENCHANTMENT.get(NamespacedKey.minecraft(alt));
-                if (en != null) return en;
-            } catch (Throwable ignored2) {}
+                Enchantment enchantment = (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string2));
+                if (enchantment == null) continue;
+                return enchantment;
+            }
+            catch (Throwable throwable) {
+                // empty catch block
+            }
         }
         return null;
     }
 
-    /** 按 key 构建神器 ItemStack (任意线程, 纯对象) */
-    public ItemStack buildItem(String key) {
-        ArtifactDef def = defs.get(key.toLowerCase(Locale.ROOT));
-        if (def == null) return null;
-        ItemStack it = new ItemStack(def.material, 1);
-        ItemMeta meta = it.getItemMeta();
-        if (meta != null) {
-            meta.displayName(LegacyComponentSerializer.legacyAmpersand().deserialize(def.name));
-            List<Component> lore = new ArrayList<>();
-            lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&8&m               &r&6&l 神 器 &8&m               "));
-            for (String line : def.lore)
-                lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
-            lore.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&7&o—— 装备后获得神器之力 ——"));
-            meta.lore(lore);
-            it.setItemMeta(meta);
+    public ItemStack buildItem(String string) {
+        Object object;
+        ArtifactDef artifactDef = this.defs.get(string.toLowerCase(Locale.ROOT));
+        if (artifactDef == null) {
+            return null;
         }
-        // 应用神器附魔
-        for (Map.Entry<Enchantment, Integer> e : def.enchants.entrySet()) {
-            try { it.addUnsafeEnchantment(e.getKey(), Math.min(127, e.getValue())); } catch (Throwable ignored) {}
+        ItemStack itemStack = new ItemStack(artifactDef.material, 1);
+        ItemMeta itemMeta = itemStack.getItemMeta();
+        if (itemMeta != null) {
+            itemMeta.displayName((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(artifactDef.name));
+            object = new ArrayList();
+            object.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&8&m               &r&6&l \u795e \u5668 &8&m               "));
+            for (String string2 : artifactDef.lore) {
+                object.add(LegacyComponentSerializer.legacyAmpersand().deserialize(string2));
+            }
+            object.add(LegacyComponentSerializer.legacyAmpersand().deserialize("&7&o\u2014\u2014 \u88c5\u5907\u540e\u83b7\u5f97\u795e\u5668\u4e4b\u529b \u2014\u2014"));
+            itemMeta.lore((List)object);
+            itemStack.setItemMeta(itemMeta);
         }
-        // PDC 标记
-        final String k = def.key;
-        it.editMeta(m -> {
-            var pdc = m.getPersistentDataContainer();
-            pdc.set(keyArtifact, PersistentDataType.STRING, k);
-            if (def.effect != null && !def.effect.isEmpty())
-                pdc.set(keyEffect, PersistentDataType.STRING, def.effect);
-        });
-        return it;
+        for (Map.Entry<Enchantment, Integer> entry : artifactDef.enchants.entrySet()) {
+            try {
+                itemStack.addUnsafeEnchantment(entry.getKey(), Math.min(127, entry.getValue()));
+            }
+            catch (Throwable throwable) {}
+        }
+        object = artifactDef.key;
+        itemStack.editMeta(arg_0 -> this.lambda$buildItem$0((String)object, artifactDef, arg_0));
+        return itemStack;
     }
 
-    /** 判断是否为神器, 返回 key (非神器返回 null) */
-    public String artifactKey(ItemStack it) {
-        if (it == null || it.getType() == Material.AIR) return null;
+    public String artifactKey(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return null;
+        }
         try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keyArtifact, PersistentDataType.STRING);
-        } catch (Throwable t) { return null; }
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyArtifact, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
     }
 
-    public boolean isArtifact(ItemStack it) { return artifactKey(it) != null; }
+    public boolean isArtifact(ItemStack itemStack) {
+        return this.artifactKey(itemStack) != null;
+    }
 
-    /** 随机取一件神器 key */
     public String randomKey() {
-        if (defs.isEmpty()) return null;
-        List<ArtifactDef> list = new ArrayList<>(defs.values());
-        return list.get(ThreadLocalRandom.current().nextInt(list.size())).key;
+        if (this.defs.isEmpty()) {
+            return null;
+        }
+        ArrayList<ArtifactDef> arrayList = new ArrayList<ArtifactDef>(this.defs.values());
+        return ((ArtifactDef)arrayList.get((int)ThreadLocalRandom.current().nextInt((int)arrayList.size()))).key;
     }
 
-    /** 所有神器 key (管理/展示用) */
     public List<String> keys() {
-        return new ArrayList<>(defs.keySet());
+        return new ArrayList<String>(this.defs.keySet());
     }
 
-    /** 神器显示名 (未找到返回 key), 返回 § 码文本 */
-    public String nameOf(String key) {
-        ArtifactDef d = defs.get(key.toLowerCase(Locale.ROOT));
-        if (d == null) return key;
-        return LegacyComponentSerializer.legacySection()
-                .serialize(LegacyComponentSerializer.legacyAmpersand().deserialize(d.name));
+    public String nameOf(String string) {
+        ArtifactDef artifactDef = this.defs.get(string.toLowerCase(Locale.ROOT));
+        if (artifactDef == null) {
+            return string;
+        }
+        return LegacyComponentSerializer.legacySection().serialize((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(artifactDef.name));
     }
 
-    /** 读取神器效果 key (任意线程) */
-    public String effectOf(ItemStack it) {
-        if (it == null) return null;
+    public String effectOf(ItemStack itemStack) {
+        if (itemStack == null) {
+            return null;
+        }
         try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keyEffect, PersistentDataType.STRING);
-        } catch (Throwable t) { return null; }
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keyEffect, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
+            return null;
+        }
     }
 
-    /** 读取神器 proc 概率 (任意线程) */
-    public double procChanceOf(ItemStack it) {
-        String k = artifactKey(it);
-        if (k == null) return 0;
-        ArtifactDef d = defs.get(k);
-        return d == null ? 0 : d.procChance;
+    public double procChanceOf(ItemStack itemStack) {
+        String string = this.artifactKey(itemStack);
+        if (string == null) {
+            return 0.0;
+        }
+        ArtifactDef artifactDef = this.defs.get(string);
+        return artifactDef == null ? 0.0 : artifactDef.procChance;
     }
 
-    public double magnitudeOf(ItemStack it) {
-        String k = artifactKey(it);
-        if (k == null) return 0;
-        ArtifactDef d = defs.get(k);
-        return d == null ? 0 : d.magnitude;
+    public double magnitudeOf(ItemStack itemStack) {
+        String string = this.artifactKey(itemStack);
+        if (string == null) {
+            return 0.0;
+        }
+        ArtifactDef artifactDef = this.defs.get(string);
+        return artifactDef == null ? 0.0 : artifactDef.magnitude;
     }
 
-    private Map<Enchantment, Integer> parseEnchants(Object raw) {
-        Map<Enchantment, Integer> map = new HashMap<>();
-        if (raw instanceof Map<?, ?> em) {
-            for (Map.Entry<?, ?> e : em.entrySet()) {
-                addEnch(map, String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+    private Map<Enchantment, Integer> parseEnchants(Object object) {
+        HashMap<Enchantment, Integer> hashMap;
+        block3: {
+            String string;
+            block2: {
+                hashMap = new HashMap<Enchantment, Integer>();
+                if (!(object instanceof Map)) break block2;
+                Map map = (Map)object;
+                for (Map.Entry entry : map.entrySet()) {
+                    this.addEnch(hashMap, String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+                }
+                break block3;
             }
-        } else if (raw instanceof String s && !s.isBlank()) {
-            for (String part : s.split("[;,]")) {
-                String[] seg = part.trim().split(":");
-                if (seg.length == 2) addEnch(map, seg[0].trim(), seg[1].trim());
+            if (!(object instanceof String) || (string = (String)object).isBlank()) break block3;
+            for (String string2 : string.split("[;,]")) {
+                String[] stringArray = string2.trim().split(":");
+                if (stringArray.length != 2) continue;
+                this.addEnch(hashMap, stringArray[0].trim(), stringArray[1].trim());
             }
         }
-        return map;
+        return hashMap;
     }
 
-    private void addEnch(Map<Enchantment, Integer> map, String name, String lv) {
+    private void addEnch(Map<Enchantment, Integer> map, String string, String string2) {
         try {
-            Enchantment ench = Registry.ENCHANTMENT.get(
-                    org.bukkit.NamespacedKey.minecraft(name.toLowerCase(Locale.ROOT)));
-            if (ench != null) map.put(ench, Integer.parseInt(lv));
-        } catch (Exception ignored) {}
+            Enchantment enchantment = (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string.toLowerCase(Locale.ROOT)));
+            if (enchantment != null) {
+                map.put(enchantment, Integer.parseInt(string2));
+            }
+        }
+        catch (Exception exception) {
+            // empty catch block
+        }
+    }
+
+    private /* synthetic */ void lambda$buildItem$0(String string, ArtifactDef artifactDef, ItemMeta itemMeta) {
+        PersistentDataContainer persistentDataContainer = itemMeta.getPersistentDataContainer();
+        persistentDataContainer.set(this.keyArtifact, PersistentDataType.STRING, (Object)string);
+        if (artifactDef.effect != null && !artifactDef.effect.isEmpty()) {
+            persistentDataContainer.set(this.keyEffect, PersistentDataType.STRING, (Object)artifactDef.effect);
+        }
+    }
+
+    public record ArtifactDef(Material material, String key, String name, List<String> lore, String effect, double procChance, double magnitude, Map<Enchantment, Integer> enchants) {
     }
 }

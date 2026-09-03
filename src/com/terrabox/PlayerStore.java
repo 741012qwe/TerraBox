@@ -1,13 +1,20 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  org.bukkit.Bukkit
+ *  org.bukkit.configuration.file.YamlConfiguration
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
-import org.bukkit.Bukkit;
-import org.bukkit.configuration.file.YamlConfiguration;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,163 +25,165 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import org.bukkit.Bukkit;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.plugin.Plugin;
 
-/**
- * 玩家数据仓库 (开箱统计/内置积分/寻宝记录)
- * 线程模型 (白皮书 §5.2/§8.2):
- *  - 内存: ConcurrentHashMap + AtomicLong, 任意区域线程可直接读写
- *  - 磁盘: 全部 AsyncScheduler; 写盘用 临时文件 + ATOMIC_MOVE 原子替换
- *  - 合并: 异步加载文件时若玩家已有实时改动 (touched>0), 用加法合并基线, 不丢增量
- */
 public class PlayerStore {
     private final TerraBoxPlugin plugin;
     private final File dir;
-    private final ConcurrentHashMap<UUID, PlayerData> cache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, PlayerData> cache = new ConcurrentHashMap();
     private ScheduledTask autosaveTask;
 
-    public PlayerStore(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.dir = new File(plugin.getDataFolder(), "playerdata");
-        // 目录创建放 IO 阶段
+    public PlayerStore(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.dir = new File(terraBoxPlugin.getDataFolder(), "playerdata");
     }
 
     public void start() {
-        // 周期自动保存 (AsyncScheduler, 每 5 分钟)
-        autosaveTask = org.bukkit.Bukkit.getAsyncScheduler().runAtFixedRate(plugin, t -> {
-            for (Map.Entry<UUID, PlayerData> e : cache.entrySet()) {
-                if (e.getValue().touched.get() > 0) saveAsync(e.getKey(), e.getValue());
+        this.autosaveTask = Bukkit.getAsyncScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> {
+            for (Map.Entry<UUID, PlayerData> entry : this.cache.entrySet()) {
+                if (entry.getValue().touched.get() <= 0L) continue;
+                this.saveAsync(entry.getKey(), entry.getValue());
             }
-        }, 5, 5, TimeUnit.MINUTES);
+        }, 5L, 5L, TimeUnit.MINUTES);
     }
 
     public void shutdown() {
-        if (autosaveTask != null) autosaveTask.cancel();
-        // onDisable: 区域调度器仍活跃, 同步落盘 (白皮书 §3.3)
-        for (Map.Entry<UUID, PlayerData> e : cache.entrySet()) saveSync(e.getKey(), e.getValue());
-        cache.clear();
+        if (this.autosaveTask != null) {
+            this.autosaveTask.cancel();
+        }
+        for (Map.Entry<UUID, PlayerData> entry : this.cache.entrySet()) {
+            this.saveSync(entry.getKey(), entry.getValue());
+        }
+        this.cache.clear();
     }
 
-    /** 取数据, 不存在则创建占位 (任意线程安全, 统计递增由此进入) */
-    public PlayerData getOrCreate(UUID uuid, String name) {
-        return cache.computeIfAbsent(uuid, u -> new PlayerData(uuid, name));
+    public PlayerData getOrCreate(UUID uUID, String string) {
+        return this.cache.computeIfAbsent(uUID, uUID2 -> new PlayerData(uUID, string));
     }
 
-    /** 进服加载: 有文件则异步读取并合并 (增量不丢失); 完成后回调 (异步线程) */
-    public void loadAsync(UUID uuid, String name, Runnable afterLoad) {
-        PlayerData d = getOrCreate(uuid, name);
-        d.name = (name != null ? name : d.name);
-        Bukkit.getAsyncScheduler().runNow(plugin, t -> {
-            PlayerData loaded = read(uuid);
-            if (loaded != null) d.mergeFrom(loaded);
-            if (afterLoad != null) afterLoad.run();
+    public void loadAsync(UUID uUID, String string, Runnable runnable) {
+        PlayerData playerData = this.getOrCreate(uUID, string);
+        playerData.name = string != null ? string : playerData.name;
+        Bukkit.getAsyncScheduler().runNow((Plugin)this.plugin, scheduledTask -> {
+            PlayerData playerData2 = this.read(uUID);
+            if (playerData2 != null) {
+                playerData.mergeFrom(playerData2);
+            }
+            if (runnable != null) {
+                runnable.run();
+            }
         });
     }
 
-    /** 退出: 异步落盘并清理缓存 */
-    public void saveAndUnload(UUID uuid) {
-        PlayerData d = cache.remove(uuid);
-        if (d != null) saveAsync(uuid, d);
-    }
-
-    public void saveAsync(UUID uuid, PlayerData d) {
-        d.touched.set(0);
-        Bukkit.getAsyncScheduler().runNow(plugin, t -> saveSync(uuid, d));
-    }
-
-    private void saveSync(UUID uuid, PlayerData d) {
-        try {
-            if (!dir.exists()) dir.mkdirs();
-            File file = new File(dir, uuid + ".yml");
-            YamlConfiguration y = new YamlConfiguration();
-            y.set("name", d.name);
-            y.set("first-seen", d.firstSeen.get());
-            y.set("last-seen", System.currentTimeMillis());
-            y.set("money", d.money.get());
-            y.set("opened-common", d.openedCommon.get());
-            y.set("opened-rare", d.openedRare.get());
-            y.set("opened-epic", d.openedEpic.get());
-            y.set("opened-legendary", d.openedLegendary.get());
-            y.set("opened-mythic", d.openedMythic.get());
-            y.set("airdrop-looted", d.airdropLooted.get());
-            y.set("sold-value", d.soldValue.get());
-            y.set("hunt-count", d.huntCount.get());
-            File tmp = new File(dir, uuid + ".yml.tmp");
-            y.save(tmp);
-            try {
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING,
-                        StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException atomicFailed) {
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-        } catch (Exception e) {
-            plugin.getLogger().warning("玩家数据保存失败 " + d.name + ": " + e.getMessage());
+    public void saveAndUnload(UUID uUID) {
+        PlayerData playerData = this.cache.remove(uUID);
+        if (playerData != null) {
+            this.saveAsync(uUID, playerData);
         }
     }
 
-    private PlayerData read(UUID uuid) {
-        File file = new File(dir, uuid + ".yml");
-        if (!file.isFile()) return null;
+    public void saveAsync(UUID uUID, PlayerData playerData) {
+        playerData.touched.set(0L);
+        Bukkit.getAsyncScheduler().runNow((Plugin)this.plugin, scheduledTask -> this.saveSync(uUID, playerData));
+    }
+
+    private void saveSync(UUID uUID, PlayerData playerData) {
         try {
-            YamlConfiguration y = YamlConfiguration.loadConfiguration(file);
-            PlayerData d = new PlayerData(uuid, y.getString("name", "?"));
-            d.firstSeen.set(y.getLong("first-seen", 0));
-            d.money.set(y.getLong("money", 0));
-            d.openedCommon.set(y.getLong("opened-common", 0));
-            d.openedRare.set(y.getLong("opened-rare", 0));
-            d.openedEpic.set(y.getLong("opened-epic", 0));
-            d.openedLegendary.set(y.getLong("opened-legendary", 0));
-            d.openedMythic.set(y.getLong("opened-mythic", 0));
-            d.airdropLooted.set(y.getLong("airdrop-looted", 0));
-            d.soldValue.set(y.getLong("sold-value", 0));
-            d.huntCount.set(y.getLong("hunt-count", 0));
-            d.merged.set(true);
-            return d;
-        } catch (Exception e) {
-            plugin.getLogger().warning("玩家数据读取失败 " + uuid + ": " + e.getMessage());
+            if (!this.dir.exists()) {
+                this.dir.mkdirs();
+            }
+            File file = new File(this.dir, String.valueOf(uUID) + ".yml");
+            YamlConfiguration yamlConfiguration = new YamlConfiguration();
+            yamlConfiguration.set("name", (Object)playerData.name);
+            yamlConfiguration.set("first-seen", (Object)playerData.firstSeen.get());
+            yamlConfiguration.set("last-seen", (Object)System.currentTimeMillis());
+            yamlConfiguration.set("money", (Object)playerData.money.get());
+            yamlConfiguration.set("opened-common", (Object)playerData.openedCommon.get());
+            yamlConfiguration.set("opened-rare", (Object)playerData.openedRare.get());
+            yamlConfiguration.set("opened-epic", (Object)playerData.openedEpic.get());
+            yamlConfiguration.set("opened-legendary", (Object)playerData.openedLegendary.get());
+            yamlConfiguration.set("opened-mythic", (Object)playerData.openedMythic.get());
+            yamlConfiguration.set("airdrop-looted", (Object)playerData.airdropLooted.get());
+            yamlConfiguration.set("sold-value", (Object)playerData.soldValue.get());
+            yamlConfiguration.set("hunt-count", (Object)playerData.huntCount.get());
+            File file2 = new File(this.dir, String.valueOf(uUID) + ".yml.tmp");
+            yamlConfiguration.save(file2);
+            try {
+                Files.move(file2.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (IOException iOException) {
+                Files.move(file2.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+        catch (Exception exception) {
+            this.plugin.getLogger().warning("\u73a9\u5bb6\u6570\u636e\u4fdd\u5b58\u5931\u8d25 " + playerData.name + ": " + exception.getMessage());
+        }
+    }
+
+    private PlayerData read(UUID uUID) {
+        File file = new File(this.dir, String.valueOf(uUID) + ".yml");
+        if (!file.isFile()) {
+            return null;
+        }
+        try {
+            YamlConfiguration yamlConfiguration = YamlConfiguration.loadConfiguration((File)file);
+            PlayerData playerData = new PlayerData(uUID, yamlConfiguration.getString("name", "?"));
+            playerData.firstSeen.set(yamlConfiguration.getLong("first-seen", 0L));
+            playerData.money.set(yamlConfiguration.getLong("money", 0L));
+            playerData.openedCommon.set(yamlConfiguration.getLong("opened-common", 0L));
+            playerData.openedRare.set(yamlConfiguration.getLong("opened-rare", 0L));
+            playerData.openedEpic.set(yamlConfiguration.getLong("opened-epic", 0L));
+            playerData.openedLegendary.set(yamlConfiguration.getLong("opened-legendary", 0L));
+            playerData.openedMythic.set(yamlConfiguration.getLong("opened-mythic", 0L));
+            playerData.airdropLooted.set(yamlConfiguration.getLong("airdrop-looted", 0L));
+            playerData.soldValue.set(yamlConfiguration.getLong("sold-value", 0L));
+            playerData.huntCount.set(yamlConfiguration.getLong("hunt-count", 0L));
+            playerData.merged.set(true);
+            return playerData;
+        }
+        catch (Exception exception) {
+            this.plugin.getLogger().warning("\u73a9\u5bb6\u6570\u636e\u8bfb\u53d6\u5931\u8d25 " + String.valueOf(uUID) + ": " + exception.getMessage());
             return null;
         }
     }
 
-    /** 异步扫描全部数据文件, 返回开箱总数前10 (AsyncScheduler, 回调 Global) */
-    public interface TopCallback { void accept(List<TopEntry> list); }
-
-    public record TopEntry(String name, long count) {}
-
-    public void topAsync(TopCallback cb) {
-        Bukkit.getAsyncScheduler().runNow(plugin, t -> {
-            List<TopEntry> list = new ArrayList<>();
-            File[] files = dir.listFiles((f, n) -> n.endsWith(".yml"));
-            if (files != null) {
-                for (File f : files) {
+    public void topAsync(TopCallback topCallback) {
+        Bukkit.getAsyncScheduler().runNow((Plugin)this.plugin, scheduledTask -> {
+            ArrayList<TopEntry> arrayList = new ArrayList<TopEntry>();
+            File[] fileArray = this.dir.listFiles((file, string) -> string.endsWith(".yml"));
+            if (fileArray != null) {
+                for (File file2 : fileArray) {
                     try {
-                        YamlConfiguration y = YamlConfiguration.loadConfiguration(f);
-                        long total = y.getLong("opened-common", 0) + y.getLong("opened-rare", 0)
-                                + y.getLong("opened-epic", 0) + y.getLong("opened-legendary", 0)
-                                + y.getLong("opened-mythic", 0);
-                        if (total > 0) list.add(new TopEntry(y.getString("name", "?"), total));
-                    } catch (Exception ignored) {}
-                }
-            }
-            // 在线玩家内存数据优先 (比文件新)
-            for (PlayerData d : cache.values()) {
-                long total = d.openedTotal();
-                boolean replaced = false;
-                for (int i = 0; i < list.size(); i++) {
-                    if (list.get(i).name().equals(d.name)) {
-                        list.set(i, new TopEntry(d.name, total));
-                        replaced = true;
-                        break;
+                        YamlConfiguration yamlConfiguration = YamlConfiguration.loadConfiguration((File)file2);
+                        long l = yamlConfiguration.getLong("opened-common", 0L) + yamlConfiguration.getLong("opened-rare", 0L) + yamlConfiguration.getLong("opened-epic", 0L) + yamlConfiguration.getLong("opened-legendary", 0L) + yamlConfiguration.getLong("opened-mythic", 0L);
+                        if (l <= 0L) continue;
+                        arrayList.add(new TopEntry(yamlConfiguration.getString("name", "?"), l));
+                    }
+                    catch (Exception exception) {
+                        // empty catch block
                     }
                 }
-                if (!replaced && total > 0) list.add(new TopEntry(d.name, total));
             }
-            list.sort(Comparator.comparingLong(TopEntry::count).reversed());
-            List<TopEntry> top = list.subList(0, Math.min(10, list.size()));
-            Bukkit.getGlobalRegionScheduler().execute(plugin, () -> cb.accept(top));
+            for (PlayerData playerData : this.cache.values()) {
+                long l = playerData.openedTotal();
+                boolean bl = false;
+                for (int i = 0; i < arrayList.size(); ++i) {
+                    if (!((TopEntry)arrayList.get(i)).name().equals(playerData.name)) continue;
+                    arrayList.set(i, new TopEntry(playerData.name, l));
+                    bl = true;
+                    break;
+                }
+                if (bl || l <= 0L) continue;
+                arrayList.add(new TopEntry(playerData.name, l));
+            }
+            arrayList.sort(Comparator.comparingLong(TopEntry::count).reversed());
+            List list = arrayList.subList(0, Math.min(10, arrayList.size()));
+            Bukkit.getGlobalRegionScheduler().execute((Plugin)this.plugin, () -> topCallback.accept(list));
         });
     }
 
-    /** 玩家数据 (字段并发安全) */
     public static class PlayerData {
         public final UUID uuid;
         public volatile String name;
@@ -191,88 +200,106 @@ public class PlayerStore {
         final AtomicLong touched = new AtomicLong();
         final AtomicBoolean merged = new AtomicBoolean(false);
 
-        PlayerData(UUID uuid, String name) {
-            this.uuid = uuid;
-            this.name = name != null ? name : "?";
+        PlayerData(UUID uUID, String string) {
+            this.uuid = uUID;
+            this.name = string != null ? string : "?";
         }
 
         public boolean isNew() {
-            return firstSeen.get() == 0;
+            return this.firstSeen.get() == 0L;
         }
 
         public void touch() {
-            touched.incrementAndGet();
-            if (firstSeen.get() == 0) firstSeen.compareAndSet(0, System.currentTimeMillis());
+            this.touched.incrementAndGet();
+            if (this.firstSeen.get() == 0L) {
+                this.firstSeen.compareAndSet(0L, System.currentTimeMillis());
+            }
         }
 
         public long openedTotal() {
-            return openedCommon.get() + openedRare.get() + openedEpic.get()
-                    + openedLegendary.get() + openedMythic.get();
+            return this.openedCommon.get() + this.openedRare.get() + this.openedEpic.get() + this.openedLegendary.get() + this.openedMythic.get();
         }
 
-        public void addOpened(Rarity r) {
-            touch();
-            switch (r) {
-                case COMMON -> openedCommon.incrementAndGet();
-                case RARE -> openedRare.incrementAndGet();
-                case EPIC -> openedEpic.incrementAndGet();
-                case LEGENDARY -> openedLegendary.incrementAndGet();
-                case MYTHIC -> openedMythic.incrementAndGet();
+        public void addOpened(Rarity rarity) {
+            this.touch();
+            switch (rarity) {
+                case COMMON: {
+                    this.openedCommon.incrementAndGet();
+                    break;
+                }
+                case RARE: {
+                    this.openedRare.incrementAndGet();
+                    break;
+                }
+                case EPIC: {
+                    this.openedEpic.incrementAndGet();
+                    break;
+                }
+                case LEGENDARY: {
+                    this.openedLegendary.incrementAndGet();
+                    break;
+                }
+                case MYTHIC: {
+                    this.openedMythic.incrementAndGet();
+                }
             }
         }
 
         public double money() {
-            return money.get();
+            return this.money.get();
         }
 
-        public void addMoney(double amount) {
-            touch();
-            money.addAndGet((long) amount);
+        public void addMoney(double d) {
+            this.touch();
+            this.money.addAndGet((long)d);
         }
 
-        /** 内置积分取款: CAS 防负余额 */
-        public boolean takeMoney(double amount) {
-            long cost = (long) Math.ceil(amount);
-            while (true) {
-                long cur = money.get();
-                if (cur < cost) return false;
-                if (money.compareAndSet(cur, cur - cost)) {
-                    touch();
-                    return true;
-                }
-            }
+        public boolean takeMoney(double d) {
+            long l;
+            long l2 = (long)Math.ceil(d);
+            do {
+                if ((l = this.money.get()) >= l2) continue;
+                return false;
+            } while (!this.money.compareAndSet(l, l - l2));
+            this.touch();
+            return true;
         }
 
-        /** 异步加载后的基线合并: 计数器相加, 不覆盖实时增量 */
-        void mergeFrom(PlayerData file) {
-            if (merged.compareAndSet(false, true)) {
-                // 玩家无实时改动 → 直接采用文件值
-                if (touched.get() == 0) {
-                    firstSeen.set(file.firstSeen.get());
-                    money.set(file.money.get());
-                    openedCommon.set(file.openedCommon.get());
-                    openedRare.set(file.openedRare.get());
-                    openedEpic.set(file.openedEpic.get());
-                    openedLegendary.set(file.openedLegendary.get());
-                    openedMythic.set(file.openedMythic.get());
-                    airdropLooted.set(file.airdropLooted.get());
-                    soldValue.set(file.soldValue.get());
-                    huntCount.set(file.huntCount.get());
+        void mergeFrom(PlayerData playerData) {
+            if (this.merged.compareAndSet(false, true)) {
+                if (this.touched.get() == 0L) {
+                    this.firstSeen.set(playerData.firstSeen.get());
+                    this.money.set(playerData.money.get());
+                    this.openedCommon.set(playerData.openedCommon.get());
+                    this.openedRare.set(playerData.openedRare.get());
+                    this.openedEpic.set(playerData.openedEpic.get());
+                    this.openedLegendary.set(playerData.openedLegendary.get());
+                    this.openedMythic.set(playerData.openedMythic.get());
+                    this.airdropLooted.set(playerData.airdropLooted.get());
+                    this.soldValue.set(playerData.soldValue.get());
+                    this.huntCount.set(playerData.huntCount.get());
                 } else {
-                    // 有实时增量 → 文件值为基线, 加法合并
-                    if (firstSeen.get() == 0 && file.firstSeen.get() > 0)
-                        firstSeen.set(file.firstSeen.get());
-                    money.addAndGet(file.money.get());
-                    openedCommon.addAndGet(file.openedCommon.get());
-                    openedRare.addAndGet(file.openedRare.get());
-                    openedEpic.addAndGet(file.openedEpic.get());
-                    openedLegendary.addAndGet(file.openedLegendary.get());
-                    openedMythic.addAndGet(file.openedMythic.get());
-                    airdropLooted.addAndGet(file.airdropLooted.get());
-                    soldValue.addAndGet(file.soldValue.get());
-                    huntCount.addAndGet(file.huntCount.get());
+                    if (this.firstSeen.get() == 0L && playerData.firstSeen.get() > 0L) {
+                        this.firstSeen.set(playerData.firstSeen.get());
+                    }
+                    this.money.addAndGet(playerData.money.get());
+                    this.openedCommon.addAndGet(playerData.openedCommon.get());
+                    this.openedRare.addAndGet(playerData.openedRare.get());
+                    this.openedEpic.addAndGet(playerData.openedEpic.get());
+                    this.openedLegendary.addAndGet(playerData.openedLegendary.get());
+                    this.openedMythic.addAndGet(playerData.openedMythic.get());
+                    this.airdropLooted.addAndGet(playerData.airdropLooted.get());
+                    this.soldValue.addAndGet(playerData.soldValue.get());
+                    this.huntCount.addAndGet(playerData.huntCount.get());
                 }
             }
         }
+    }
+
+    public static interface TopCallback {
+        public void accept(List<TopEntry> var1);
+    }
+
+    public record TopEntry(String name, long count) {
     }
 }

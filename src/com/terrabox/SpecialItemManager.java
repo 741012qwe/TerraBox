@@ -1,6 +1,50 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.TextComponent
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Location
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.Particle
+ *  org.bukkit.Sound
+ *  org.bukkit.World
+ *  org.bukkit.configuration.ConfigurationSection
+ *  org.bukkit.entity.Entity
+ *  org.bukkit.entity.EntityType
+ *  org.bukkit.entity.LivingEntity
+ *  org.bukkit.entity.Player
+ *  org.bukkit.entity.TNTPrimed
+ *  org.bukkit.event.Listener
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ *  org.bukkit.persistence.PersistentDataContainer
+ *  org.bukkit.persistence.PersistentDataType
+ *  org.bukkit.plugin.Plugin
+ *  org.bukkit.potion.PotionEffect
+ *  org.bukkit.potion.PotionEffectType
+ *  org.bukkit.util.Vector
+ */
 package com.terrabox;
 
+import com.terrabox.GameManager;
+import com.terrabox.TerraBoxPlugin;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -9,658 +53,640 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TNTPrimed;
 import org.bukkit.event.Listener;
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.util.Vector;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
-
-/**
- * 特殊道具系统 —— 赋予物品自定义"使用效果" (右键触发)
- *
- * 支持的效果类型 (config special-items.<key>.effect):
- *   FIREBALL   火焰弹砸地: 向准星方向地面砸下一颗火球, 不伤自己, 对范围内其他玩家
- *              造成半心(0.5)伤害, 并按原版 TNT 距离把玩家炸飞
- *   HEAL       治疗: 范围回血
- *   LIGHTNING  雷击: 准星处落雷, 对范围内敌人造成伤害
- *   SPEED      急速: 获得速度 buff
- *   JUMP       跳跃提升 buff
- *   FREEZE     冰冻: 范围敌人减速+发光
- *   SHIELD     抗性提升 buff
- *   FIRE_RES   防火 buff
- *   TNT_LAUNCH 掷出受控 TNT (不伤自己)
- *   REPULSE    击退波: 把周围玩家按击退距离炸飞 (不造成任何伤害)
- *
- * 线程模型:
- *  - 构建物品: 纯对象 (任意线程)
- *  - 触发效果 (PlayerInteractEvent): 玩家区域线程; 范围内实体操作经 Block/entity 区域线程
- *  - 特殊道具通过 PDC 标记 (terrabox_special=effectKey), 消费后减少数量
- */
-public class SpecialItemManager implements Listener {
-    public static final String TITLE = "特殊道具";
+public class SpecialItemManager
+implements Listener {
+    public static final String TITLE = "\u7279\u6b8a\u9053\u5177";
     private final TerraBoxPlugin plugin;
     private final NamespacedKey keySpecial;
     private final NamespacedKey keyData;
     private final NamespacedKey keyTntInstant;
-    private final Map<String, SpecialDef> defs = new HashMap<>();
-    // 追踪器: 使用者UUID → 被追踪者UUID; 使用者UUID → 到期时刻(ms); 使用者UUID → 追踪方向/距离文本缓存
-    private final Map<UUID, UUID> trackTargets = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Map<UUID, Long> trackExpiry = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Map<UUID, String> trackTexts = new java.util.concurrent.ConcurrentHashMap<>();
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask trackTask;
+    private final Map<String, SpecialDef> defs = new HashMap<String, SpecialDef>();
+    private final Map<UUID, UUID> trackTargets = new ConcurrentHashMap<UUID, UUID>();
+    private final Map<UUID, Long> trackExpiry = new ConcurrentHashMap<UUID, Long>();
+    private final Map<UUID, String> trackTexts = new ConcurrentHashMap<UUID, String>();
+    private ScheduledTask trackTask;
 
-    /** 读取指定玩家的追踪方向/距离文本 (任意线程; 无则空) 供计分板合并到同一 BossBar 显示 */
-    public String trackingText(UUID u) { return trackTexts.getOrDefault(u, ""); }
+    public String trackingText(UUID uUID) {
+        return this.trackTexts.getOrDefault(uUID, "");
+    }
 
-    /** 特殊道具定义 (从 config 解析) */
-    public record SpecialDef(Material material, String key, String name, List<String> lore,
-                             String effect, double radius, double damage,
-                             double velocity, int durationSeconds) {}
-
-    public SpecialItemManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.keySpecial = new NamespacedKey(plugin, "special");
-        this.keyData = new NamespacedKey(plugin, "special_data");
-        this.keyTntInstant = new NamespacedKey(plugin, "tnt_instant");
+    public SpecialItemManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.keySpecial = new NamespacedKey((Plugin)terraBoxPlugin, "special");
+        this.keyData = new NamespacedKey((Plugin)terraBoxPlugin, "special_data");
+        this.keyTntInstant = new NamespacedKey((Plugin)terraBoxPlugin, "tnt_instant");
     }
 
     public void load() {
-        defs.clear();
-        var sec = plugin.getConfig().getConfigurationSection("special-items");
-        if (sec == null || sec.getKeys(false).isEmpty()) {
-            // 配置缺失/为空: 注册内置默认特殊道具 (保证功能可用, 旧 config 服务器也能用)
-            plugin.getLogger().info("特殊道具表: 未检测到配置段, 已加载内置默认道具");
-            registerDefaults();
+        this.defs.clear();
+        ConfigurationSection configurationSection = this.plugin.getConfig().getConfigurationSection("special-items");
+        if (configurationSection == null || configurationSection.getKeys(false).isEmpty()) {
+            this.plugin.getLogger().info("\u7279\u6b8a\u9053\u5177\u8868: \u672a\u68c0\u6d4b\u5230\u914d\u7f6e\u6bb5, \u5df2\u52a0\u8f7d\u5185\u7f6e\u9ed8\u8ba4\u9053\u5177");
+            this.registerDefaults();
             return;
         }
-        for (String key : sec.getKeys(false)) {
-            var s = sec.getConfigurationSection(key);
-            if (s == null) continue;
+        for (String string : configurationSection.getKeys(false)) {
+            ConfigurationSection configurationSection2 = configurationSection.getConfigurationSection(string);
+            if (configurationSection2 == null) continue;
             try {
-                Material mat = Material.matchMaterial(s.getString("material", "FIRE_CHARGE").toUpperCase(Locale.ROOT));
-                if (mat == null || !mat.isItem()) {
-                    plugin.getLogger().warning("特殊道具 [" + key + "] 材质无效: " + s.getString("material"));
+                Material material = Material.matchMaterial((String)configurationSection2.getString("material", "FIRE_CHARGE").toUpperCase(Locale.ROOT));
+                if (material == null || !material.isItem()) {
+                    this.plugin.getLogger().warning("\u7279\u6b8a\u9053\u5177 [" + string + "] \u6750\u8d28\u65e0\u6548: " + configurationSection2.getString("material"));
                     continue;
                 }
-                String effect = s.getString("effect", "FIREBALL").toUpperCase(Locale.ROOT);
-                String name = s.getString("name", "&e" + key);
-                List<String> lore = new ArrayList<>(s.getStringList("lore"));
-                double radius = s.getDouble("radius", 4.0);
-                double damage = s.getDouble("damage", 0.5);
-                double velocity = s.getDouble("velocity", 1.4);
-                int dur = s.getInt("duration-seconds", 5);
-                defs.put(key.toLowerCase(Locale.ROOT),
-                        new SpecialDef(mat, key.toLowerCase(Locale.ROOT), name, lore,
-                                effect, radius, damage, velocity, dur));
-            } catch (Exception e) {
-                plugin.getLogger().warning("特殊道具 [" + key + "] 解析失败: " + e.getMessage());
+                String string2 = configurationSection2.getString("effect", "FIREBALL").toUpperCase(Locale.ROOT);
+                String string3 = configurationSection2.getString("name", "&e" + string);
+                ArrayList<String> arrayList = new ArrayList<String>(configurationSection2.getStringList("lore"));
+                double d = configurationSection2.getDouble("radius", 4.0);
+                double d2 = configurationSection2.getDouble("damage", 0.5);
+                double d3 = configurationSection2.getDouble("velocity", 1.4);
+                int n = configurationSection2.getInt("duration-seconds", 5);
+                this.defs.put(string.toLowerCase(Locale.ROOT), new SpecialDef(material, string.toLowerCase(Locale.ROOT), string3, arrayList, string2, d, d2, d3, n));
+            }
+            catch (Exception exception) {
+                this.plugin.getLogger().warning("\u7279\u6b8a\u9053\u5177 [" + string + "] \u89e3\u6790\u5931\u8d25: " + exception.getMessage());
             }
         }
-        plugin.getLogger().info("特殊道具表加载完成: " + defs.size() + " 种");
+        this.plugin.getLogger().info("\u7279\u6b8a\u9053\u5177\u8868\u52a0\u8f7d\u5b8c\u6210: " + this.defs.size() + " \u79cd");
     }
 
-    public int size() { return defs.size(); }
+    public int size() {
+        return this.defs.size();
+    }
 
-    /** 启动追踪器后台任务 (每 10 tick 刷新一次所有追踪者的 ActionBar 方位提示) */
     public void start() {
-        stop();
-        trackTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tickTracks(), 10L, 10L);
+        this.stop();
+        this.trackTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.tickTracks(), 10L, 10L);
     }
 
-    /** 停止追踪器后台任务 */
     public void stop() {
-        if (trackTask != null) { trackTask.cancel(); trackTask = null; }
-        trackTargets.clear();
-        trackExpiry.clear();
-        trackTexts.clear();
+        if (this.trackTask != null) {
+            this.trackTask.cancel();
+            this.trackTask = null;
+        }
+        this.trackTargets.clear();
+        this.trackExpiry.clear();
+        this.trackTexts.clear();
     }
 
-    /** 追踪器主循环 (Global 线程): 给所有追踪者刷新锁定目标的方位+距离 (存入 trackTexts, 由计分板合并显示, 不单独开 BossBar/ActionBar) */
     private void tickTracks() {
-        long now = System.currentTimeMillis();
-        for (Map.Entry<UUID, UUID> e : trackTargets.entrySet()) {
-            UUID hunter = e.getKey();
-            UUID prey = e.getValue();
-            Long exp = trackExpiry.get(hunter);
-            if (exp == null || now > exp) {
-                trackTargets.remove(hunter);
-                trackExpiry.remove(hunter);
-                trackTexts.remove(hunter);
+        long l = System.currentTimeMillis();
+        for (Map.Entry<UUID, UUID> entry : this.trackTargets.entrySet()) {
+            UUID uUID = entry.getKey();
+            UUID uUID2 = entry.getValue();
+            Long l2 = this.trackExpiry.get(uUID);
+            if (l2 == null || l > l2) {
+                this.trackTargets.remove(uUID);
+                this.trackExpiry.remove(uUID);
+                this.trackTexts.remove(uUID);
                 continue;
             }
-            Player hp = Bukkit.getPlayer(hunter);
-            if (hp == null || !hp.isOnline()) { trackTargets.remove(hunter); trackExpiry.remove(hunter); trackTexts.remove(hunter); continue; }
-            Player pr = Bukkit.getPlayer(prey);
-            if (pr == null || !pr.isOnline()) {
-                // 目标离线/丢失: 提示并解除
-                trackTargets.remove(hunter);
-                trackExpiry.remove(hunter);
-                trackTexts.remove(hunter);
-                hp.sendActionBar(net.kyori.adventure.text.serializer.legacy
-                        .LegacyComponentSerializer.legacyAmpersand().deserialize("§c追踪目标已消失!"));
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            if (player == null || !player.isOnline()) {
+                this.trackTargets.remove(uUID);
+                this.trackExpiry.remove(uUID);
+                this.trackTexts.remove(uUID);
                 continue;
             }
-            final Player ffp = hp;
-            final Player fprey = pr;
-            final long fexp = exp;
-            ffp.getScheduler().run(plugin, task -> {
+            Player player2 = Bukkit.getPlayer((UUID)uUID2);
+            if (player2 == null || !player2.isOnline()) {
+                this.trackTargets.remove(uUID);
+                this.trackExpiry.remove(uUID);
+                this.trackTexts.remove(uUID);
+                player.sendActionBar((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7c\u8ffd\u8e2a\u76ee\u6807\u5df2\u6d88\u5931!"));
+                continue;
+            }
+            Player player3 = player;
+            Player player4 = player2;
+            long l3 = l2;
+            player3.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
                 try {
-                    Location hl = ffp.getLocation();
-                    Location pl = fprey.getLocation();
-                    if (!hl.getWorld().equals(pl.getWorld())) return;
-                    double dx = pl.getX() - hl.getX();
-                    double dz = pl.getZ() - hl.getZ();
-                    double dy = pl.getY() - hl.getY();
-                    int dist = (int) Math.round(Math.sqrt(dx * dx + dz * dz + dy * dy));
-                    String dir = trackCompass(dx, dz);
-                    long remain = Math.max(0, (fexp - System.currentTimeMillis()) / 1000);
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("§e§l▣追踪[§a").append(fprey.getName()).append("§e]§7→§f").append(dir)
-                            .append("§7 §f").append(dist).append("格§7(高差")
-                            .append(dy >= 0 ? "+" : "").append((int) dy).append(")§7剩§c")
-                            .append(remain).append("秒");
-                    trackTexts.put(ffp.getUniqueId(), sb.toString());
-                } catch (Throwable ignored) {}
+                    Location location = player3.getLocation();
+                    Location location2 = player4.getLocation();
+                    if (!location.getWorld().equals((Object)location2.getWorld())) {
+                        return;
+                    }
+                    double d = location2.getX() - location.getX();
+                    double d2 = location2.getZ() - location.getZ();
+                    double d3 = location2.getY() - location.getY();
+                    int n = (int)Math.round(Math.sqrt(d * d + d2 * d2 + d3 * d3));
+                    String string = this.trackCompass(d, d2);
+                    long l2 = Math.max(0L, (l3 - System.currentTimeMillis()) / 1000L);
+                    StringBuilder stringBuilder = new StringBuilder();
+                    stringBuilder.append("\u00a7e\u00a7l\u25a3\u8ffd\u8e2a[\u00a7a").append(player4.getName()).append("\u00a7e]\u00a77\u2192\u00a7f").append(string).append("\u00a77 \u00a7f").append(n).append("\u683c\u00a77(\u9ad8\u5dee").append(d3 >= 0.0 ? "+" : "").append((int)d3).append(")\u00a77\u5269\u00a7c").append(l2).append("\u79d2");
+                    this.trackTexts.put(player3.getUniqueId(), stringBuilder.toString());
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
             }, () -> {});
         }
     }
 
-    /** 移除指定玩家的追踪文本缓存 */
-    private void removeTrackBar(UUID hunter) {
-        trackTexts.remove(hunter);
-    }
-    /** 追踪罗盘方位 (从追踪者指向目标) */
-    private String trackCompass(double dx, double dz) {
-        String[] names = {"北", "东北", "东", "东南", "南", "西南", "西", "西北"};
-        double deg = Math.toDegrees(Math.atan2(dx, -dz));
-        deg = (deg + 360) % 360;
-        int idx = (int) Math.floor((deg + 22.5) / 45.0) % 8;
-        return names[idx] + "§7(§f" + (int) deg + "°§7)";
+    private void removeTrackBar(UUID uUID) {
+        this.trackTexts.remove(uUID);
     }
 
-    /** 追踪器是否在追踪 (供清理) */
-    public boolean isTracking(UUID hunter) { return trackTargets.containsKey(hunter); }
-    public UUID trackingTarget(UUID hunter) { return trackTargets.get(hunter); }
-    public void stopTracking(UUID hunter) { trackTargets.remove(hunter); trackExpiry.remove(hunter); trackTexts.remove(hunter); }
-    /** 所有追踪中的玩家 (用于对局结束清理) */
-    public java.util.Set<UUID> trackingPlayers() { return java.util.Set.copyOf(trackTargets.keySet()); }
+    private String trackCompass(double d, double d2) {
+        String[] stringArray = new String[]{"\u5317", "\u4e1c\u5317", "\u4e1c", "\u4e1c\u5357", "\u5357", "\u897f\u5357", "\u897f", "\u897f\u5317"};
+        double d3 = Math.toDegrees(Math.atan2(d, -d2));
+        d3 = (d3 + 360.0) % 360.0;
+        int n = (int)Math.floor((d3 + 22.5) / 45.0) % 8;
+        return stringArray[n] + "\u00a77(\u00a7f" + (int)d3 + "\u00b0\u00a77)";
+    }
 
-    /** 内置默认特殊道具 (config 缺失兜底, 保证核心效果可用) */
+    public boolean isTracking(UUID uUID) {
+        return this.trackTargets.containsKey(uUID);
+    }
+
+    public UUID trackingTarget(UUID uUID) {
+        return this.trackTargets.get(uUID);
+    }
+
+    public void stopTracking(UUID uUID) {
+        this.trackTargets.remove(uUID);
+        this.trackExpiry.remove(uUID);
+        this.trackTexts.remove(uUID);
+    }
+
+    public Set<UUID> trackingPlayers() {
+        return Set.copyOf(this.trackTargets.keySet());
+    }
+
     private void registerDefaults() {
-        defs.put("fireball_tnt", new SpecialDef(Material.FIRE_CHARGE, "fireball_tnt",
-                "&6&l震地火弹", List.of("&7右键朝地面砸下, 引爆范围冲击。",
-                        "&7不伤自己, 对周围玩家造成 &c半心 &7伤害, 并按 TNT 力度炸飞。"),
-                "FIREBALL", 4.0, 0.5, 1.6, 5));
-        defs.put("fireball_big", new SpecialDef(Material.FIRE_CHARGE, "fireball_big",
-                "&d&l烈焰震地弹", List.of("&7右键朝地面砸下, 大范围爆炸。",
-                        "&7不伤自己, 对周围玩家造成 &c半心 &7伤害, 并炸飞得更远。"),
-                "FIREBALL", 6.0, 0.5, 2.2, 5));
-        defs.put("heal_potion", new SpecialDef(Material.POTION, "heal_potion",
-                "&a&l回春药剂", List.of("&7右键使用, 恢复范围内生命 4~8 心。"),
-                "HEAL", 5.0, 0, 0, 0));
-        defs.put("lightning_wand", new SpecialDef(Material.BLAZE_ROD, "lightning_wand",
-                "&b&l引雷杖", List.of("&7右键朝准星方向召来落雷, 对范围敌人造成高额伤害。"),
-                "LIGHTNING", 4.0, 1.5, 0, 0));
-        defs.put("speed_charge", new SpecialDef(Material.SUGAR, "speed_charge",
-                "&e&l疾风冲锋", List.of("&7右键使用, 获得速度提升 12 秒。"),
-                "SPEED", 0, 0, 0, 12));
-        defs.put("jump_charge", new SpecialDef(Material.RABBIT_FOOT, "jump_charge",
-                "&a&l弹跳强化", List.of("&7右键使用, 获得跳跃提升 12 秒。"),
-                "JUMP", 0, 0, 0, 12));
-        defs.put("freeze_crystal", new SpecialDef(Material.ICE, "freeze_crystal",
-                "&b&l冰霜禁锢", List.of("&7右键使用, 冻结周围敌人 8 秒。"),
-                "FREEZE", 5.0, 0, 0, 8));
-        defs.put("shield_charge", new SpecialDef(Material.SHIELD, "shield_charge",
-                "&f&l铁壁护盾", List.of("&7右键使用, 获得抗性提升 10 秒。"),
-                "SHIELD", 0, 0, 0, 10));
-        defs.put("fire_res_charge", new SpecialDef(Material.BLAZE_POWDER, "fire_res_charge",
-                "&c&l烈焰抗性", List.of("&7右键使用, 获得防火效果 15 秒。"),
-                "FIRE_RES", 0, 0, 0, 15));
-        defs.put("tnt_charge", new SpecialDef(Material.TNT, "tnt_charge",
-                "&6&l轰天炸药", List.of("&7右键掷出一枚不会伤及自己的 TNT。"),
-                "TNT_LAUNCH", 5.0, 0, 0, 0));
-        defs.put("repulse_wave", new SpecialDef(Material.FIREWORK_STAR, "repulse_wave",
-                "&d&l冲击波", List.of("&7右键释放击退波, 把周围玩家炸飞 (不伤害)。"),
-                "REPULSE", 6.0, 0, 2.0, 0));
-        defs.put("enemy_tracker", new SpecialDef(Material.COMPASS, "enemy_tracker",
-                "&e&l追踪罗盘", List.of("&7右键使用, 锁定一名随机存活敌人。",
-                        "&7在其头顶持续显示方向与距离 §a25 §7秒。"),
-                "TRACK", 0, 0, 0, 25));
+        this.defs.put("fireball_tnt", new SpecialDef(Material.FIRE_CHARGE, "fireball_tnt", "&6&l\u9707\u5730\u706b\u5f39", List.of("&7\u53f3\u952e\u671d\u5730\u9762\u7838\u4e0b, \u5f15\u7206\u8303\u56f4\u51b2\u51fb\u3002", "&7\u4e0d\u4f24\u81ea\u5df1, \u5bf9\u5468\u56f4\u73a9\u5bb6\u9020\u6210 &c\u534a\u5fc3 &7\u4f24\u5bb3, \u5e76\u6309 TNT \u529b\u5ea6\u70b8\u98de\u3002"), "FIREBALL", 4.0, 0.5, 1.6, 5));
+        this.defs.put("fireball_big", new SpecialDef(Material.FIRE_CHARGE, "fireball_big", "&d&l\u70c8\u7130\u9707\u5730\u5f39", List.of("&7\u53f3\u952e\u671d\u5730\u9762\u7838\u4e0b, \u5927\u8303\u56f4\u7206\u70b8\u3002", "&7\u4e0d\u4f24\u81ea\u5df1, \u5bf9\u5468\u56f4\u73a9\u5bb6\u9020\u6210 &c\u534a\u5fc3 &7\u4f24\u5bb3, \u5e76\u70b8\u98de\u5f97\u66f4\u8fdc\u3002"), "FIREBALL", 6.0, 0.5, 2.2, 5));
+        this.defs.put("heal_potion", new SpecialDef(Material.POTION, "heal_potion", "&a&l\u56de\u6625\u836f\u5242", List.of("&7\u53f3\u952e\u4f7f\u7528, \u6062\u590d\u8303\u56f4\u5185\u751f\u547d 4~8 \u5fc3\u3002"), "HEAL", 5.0, 0.0, 0.0, 0));
+        this.defs.put("lightning_wand", new SpecialDef(Material.BLAZE_ROD, "lightning_wand", "&b&l\u5f15\u96f7\u6756", List.of("&7\u53f3\u952e\u671d\u51c6\u661f\u65b9\u5411\u53ec\u6765\u843d\u96f7, \u5bf9\u8303\u56f4\u654c\u4eba\u9020\u6210\u9ad8\u989d\u4f24\u5bb3\u3002"), "LIGHTNING", 4.0, 1.5, 0.0, 0));
+        this.defs.put("speed_charge", new SpecialDef(Material.SUGAR, "speed_charge", "&e&l\u75be\u98ce\u51b2\u950b", List.of("&7\u53f3\u952e\u4f7f\u7528, \u83b7\u5f97\u901f\u5ea6\u63d0\u5347 12 \u79d2\u3002"), "SPEED", 0.0, 0.0, 0.0, 12));
+        this.defs.put("jump_charge", new SpecialDef(Material.RABBIT_FOOT, "jump_charge", "&a&l\u5f39\u8df3\u5f3a\u5316", List.of("&7\u53f3\u952e\u4f7f\u7528, \u83b7\u5f97\u8df3\u8dc3\u63d0\u5347 12 \u79d2\u3002"), "JUMP", 0.0, 0.0, 0.0, 12));
+        this.defs.put("freeze_crystal", new SpecialDef(Material.ICE, "freeze_crystal", "&b&l\u51b0\u971c\u7981\u9522", List.of("&7\u53f3\u952e\u4f7f\u7528, \u51bb\u7ed3\u5468\u56f4\u654c\u4eba 8 \u79d2\u3002"), "FREEZE", 5.0, 0.0, 0.0, 8));
+        this.defs.put("shield_charge", new SpecialDef(Material.SHIELD, "shield_charge", "&f&l\u94c1\u58c1\u62a4\u76fe", List.of("&7\u53f3\u952e\u4f7f\u7528, \u83b7\u5f97\u6297\u6027\u63d0\u5347 10 \u79d2\u3002"), "SHIELD", 0.0, 0.0, 0.0, 10));
+        this.defs.put("fire_res_charge", new SpecialDef(Material.BLAZE_POWDER, "fire_res_charge", "&c&l\u70c8\u7130\u6297\u6027", List.of("&7\u53f3\u952e\u4f7f\u7528, \u83b7\u5f97\u9632\u706b\u6548\u679c 15 \u79d2\u3002"), "FIRE_RES", 0.0, 0.0, 0.0, 15));
+        this.defs.put("tnt_charge", new SpecialDef(Material.TNT, "tnt_charge", "&6&l\u8f70\u5929\u70b8\u836f", List.of("&7\u53f3\u952e\u63b7\u51fa\u4e00\u679a\u4e0d\u4f1a\u4f24\u53ca\u81ea\u5df1\u7684 TNT\u3002"), "TNT_LAUNCH", 5.0, 0.0, 0.0, 0));
+        this.defs.put("repulse_wave", new SpecialDef(Material.FIREWORK_STAR, "repulse_wave", "&d&l\u51b2\u51fb\u6ce2", List.of("&7\u53f3\u952e\u91ca\u653e\u51fb\u9000\u6ce2, \u628a\u5468\u56f4\u73a9\u5bb6\u70b8\u98de (\u4e0d\u4f24\u5bb3)\u3002"), "REPULSE", 6.0, 0.0, 2.0, 0));
+        this.defs.put("enemy_tracker", new SpecialDef(Material.COMPASS, "enemy_tracker", "&e&l\u8ffd\u8e2a\u7f57\u76d8", List.of("&7\u53f3\u952e\u4f7f\u7528, \u9501\u5b9a\u4e00\u540d\u968f\u673a\u5b58\u6d3b\u654c\u4eba\u3002", "&7\u5728\u5176\u5934\u9876\u6301\u7eed\u663e\u793a\u65b9\u5411\u4e0e\u8ddd\u79bb \u00a7a25 \u00a77\u79d2\u3002"), "TRACK", 0.0, 0.0, 0.0, 25));
     }
 
-    /** 按 key 构建特殊道具 ItemStack (任意线程, 纯对象) */
-    public ItemStack buildItem(String key) {
-        SpecialDef def = defs.get(key.toLowerCase(Locale.ROOT));
-        if (def == null) return null;
-        ItemStack it = new ItemStack(def.material, 1);
-        ItemMeta meta = it.getItemMeta();
-        if (meta != null) {
-            Component nameComp = LegacyComponentSerializer.legacyAmpersand().deserialize(def.name);
-            meta.displayName(nameComp);
-            List<Component> loreComps = new ArrayList<>();
-            for (String line : def.lore) loreComps.add(LegacyComponentSerializer.legacyAmpersand().deserialize(line));
-            meta.lore(loreComps);
-            it.setItemMeta(meta);
+    public ItemStack buildItem(String string) {
+        SpecialDef specialDef = this.defs.get(string.toLowerCase(Locale.ROOT));
+        if (specialDef == null) {
+            return null;
         }
-        // PDC 标记特殊道具 (不可被当作普通材料回收)
-        it.editMeta(m -> {
-            var pdc = m.getPersistentDataContainer();
-            pdc.set(keySpecial, PersistentDataType.STRING, def.key);
-            pdc.set(keyData, PersistentDataType.STRING, def.effect);
+        ItemStack itemStack = new ItemStack(specialDef.material, 1);
+        ItemMeta itemMeta2 = itemStack.getItemMeta();
+        if (itemMeta2 != null) {
+            TextComponent textComponent = LegacyComponentSerializer.legacyAmpersand().deserialize(specialDef.name);
+            itemMeta2.displayName((Component)textComponent);
+            ArrayList<TextComponent> arrayList = new ArrayList<TextComponent>();
+            for (String string2 : specialDef.lore) {
+                arrayList.add(LegacyComponentSerializer.legacyAmpersand().deserialize(string2));
+            }
+            itemMeta2.lore(arrayList);
+            itemStack.setItemMeta(itemMeta2);
+        }
+        itemStack.editMeta(itemMeta -> {
+            PersistentDataContainer persistentDataContainer = itemMeta.getPersistentDataContainer();
+            persistentDataContainer.set(this.keySpecial, PersistentDataType.STRING, (Object)specialDef.key);
+            persistentDataContainer.set(this.keyData, PersistentDataType.STRING, (Object)specialDef.effect);
         });
-        return it;
+        return itemStack;
     }
 
-    /** 判断物品是否为特殊道具, 返回 effectKey (非特殊返回 null) */
-    public String specialKey(ItemStack it) {
-        if (it == null || it.getType() == Material.AIR) return null;
+    public String specialKey(ItemStack itemStack) {
+        if (itemStack == null || itemStack.getType() == Material.AIR) {
+            return null;
+        }
         try {
-            return it.getItemMeta().getPersistentDataContainer()
-                    .get(keySpecial, PersistentDataType.STRING);
-        } catch (Throwable t) {
+            return (String)itemStack.getItemMeta().getPersistentDataContainer().get(this.keySpecial, PersistentDataType.STRING);
+        }
+        catch (Throwable throwable) {
             return null;
         }
     }
 
-    /** 判断物品是否为特殊道具 (用于回收站排除) */
-    public boolean isSpecial(ItemStack it) {
-        return specialKey(it) != null;
+    public boolean isSpecial(ItemStack itemStack) {
+        return this.specialKey(itemStack) != null;
     }
 
-    /** 随机取一个特殊道具 key (任意线程) */
     public String randomKey() {
-        if (defs.isEmpty()) return null;
-        List<SpecialDef> list = new ArrayList<>(defs.values());
-        return list.get(ThreadLocalRandom.current().nextInt(list.size())).key;
+        if (this.defs.isEmpty()) {
+            return null;
+        }
+        ArrayList<SpecialDef> arrayList = new ArrayList<SpecialDef>(this.defs.values());
+        return ((SpecialDef)arrayList.get((int)ThreadLocalRandom.current().nextInt((int)arrayList.size()))).key;
     }
 
-    /**
-     * 触发特殊道具效果 (玩家区域线程调用, 由 PlayerInteractEvent 进入)
-     * 返回 true 表示消费该道具 (减数量), false 表示不消费
-     */
-    public boolean trigger(Player player, ItemStack item) {
-        return trigger(player, item, false);
+    public boolean trigger(Player player, ItemStack itemStack) {
+        return this.trigger(player, itemStack, false);
     }
 
-    /**
-     * 触发特殊道具效果 (玩家区域线程调用, 由 PlayerInteractEvent 进入)
-     * @param offHand true=道具在副手, false=主手 (徒手/主手右键)
-     * 返回 true 表示消费该道具 (减数量), false 表示不消费
-     */
-    public boolean trigger(Player player, ItemStack item, boolean offHand) {
-        String key = specialKey(item);
-        if (key == null) return false;
-        SpecialDef def = defs.get(key);
-        if (def == null) return false;
+    public boolean trigger(Player player, ItemStack itemStack, boolean bl) {
+        String string = this.specialKey(itemStack);
+        if (string == null) {
+            return false;
+        }
+        SpecialDef specialDef = this.defs.get(string);
+        if (specialDef == null) {
+            return false;
+        }
         try {
-            // 先执行效果 (可能抛异常/失败), 全部成功后最后再 consume
-            // 避免"效果未生效但道具已被消耗"的错乱 (consume 在效果前执行的 bug)
-            // TRACK 特判: 无目标时返回 false, 不消费道具
-            boolean ok = switch (def.effect) {
-                case "FIREBALL" -> { fireball(player, def); yield true; }
-                case "HEAL" -> { heal(player, def); yield true; }
-                case "LIGHTNING" -> { lightning(player, def); yield true; }
-                case "SPEED" -> { applyPotion(player, PotionEffectType.SPEED, def); yield true; }
-                case "JUMP" -> { applyPotion(player, PotionEffectType.JUMP_BOOST, def); yield true; }
-                case "FREEZE" -> { freeze(player, def); yield true; }
-                case "SHIELD" -> { applyPotion(player, PotionEffectType.RESISTANCE, def); yield true; }
-                case "FIRE_RES" -> { applyPotion(player, PotionEffectType.FIRE_RESISTANCE, def); yield true; }
-                case "TNT_LAUNCH" -> { tntLaunch(player, def); yield true; }
-                case "REPULSE" -> { repulse(player, def); yield true; }
-                case "TRACK" -> track(player, def);
-                default -> { plugin.getLogger().warning("特殊道具 [" + key + "] 未知效果: " + def.effect); yield false; }
-            };
-            if (!ok) return false; // 效果未成功(如追踪无目标), 不消费
-            // 效果已成功, 最后消耗道具 (一次只用一个)
-            consume(player, item, def, offHand);
+            boolean bl2;
+            switch (specialDef.effect) {
+                case "FIREBALL": {
+                    this.fireball(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "HEAL": {
+                    this.heal(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "LIGHTNING": {
+                    this.lightning(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "SPEED": {
+                    this.applyPotion(player, PotionEffectType.SPEED, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "JUMP": {
+                    this.applyPotion(player, PotionEffectType.JUMP_BOOST, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "FREEZE": {
+                    this.freeze(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "SHIELD": {
+                    this.applyPotion(player, PotionEffectType.RESISTANCE, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "FIRE_RES": {
+                    this.applyPotion(player, PotionEffectType.FIRE_RESISTANCE, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "TNT_LAUNCH": {
+                    this.tntLaunch(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "REPULSE": {
+                    this.repulse(player, specialDef);
+                    boolean bl3 = true;
+                    break;
+                }
+                case "TRACK": {
+                    boolean bl3 = this.track(player, specialDef);
+                    break;
+                }
+                default: {
+                    this.plugin.getLogger().warning("\u7279\u6b8a\u9053\u5177 [" + string + "] \u672a\u77e5\u6548\u679c: " + specialDef.effect);
+                    boolean bl3 = bl2 = false;
+                }
+            }
+            if (!bl2) {
+                return false;
+            }
+            this.consume(player, itemStack, specialDef, bl);
             return true;
-        } catch (Throwable t) {
-            plugin.getLogger().warning("特殊道具 [" + key + "] 触发异常: " + t.getClass().getSimpleName()
-                    + " - " + t.getMessage());
+        }
+        catch (Throwable throwable) {
+            this.plugin.getLogger().warning("\u7279\u6b8a\u9053\u5177 [" + string + "] \u89e6\u53d1\u5f02\u5e38: " + throwable.getClass().getSimpleName() + " - " + throwable.getMessage());
             return false;
         }
     }
 
-    /** 消费道具: 数量-1 (一次只用一个, 不是整组), 为0则移除对应手 (玩家区域线程) */
-    private boolean consume(Player player, ItemStack item, SpecialDef def, boolean offHand) {
-        // 从执行线程操作, 需在玩家区域线程 —— 已保证 (interact 事件线程)
-        item.setAmount(item.getAmount() - 1);
-        if (item.getAmount() <= 0) {
-            // 清空该格 (主手/副手)
-            if (offHand) player.getInventory().setItemInOffHand(null);
-            else player.getInventory().setItemInMainHand(null);
+    private boolean consume(Player player, ItemStack itemStack, SpecialDef specialDef, boolean bl) {
+        itemStack.setAmount(itemStack.getAmount() - 1);
+        if (itemStack.getAmount() <= 0) {
+            if (bl) {
+                player.getInventory().setItemInOffHand(null);
+            } else {
+                player.getInventory().setItemInMainHand(null);
+            }
+        } else if (bl) {
+            player.getInventory().setItemInOffHand(itemStack);
         } else {
-            if (offHand) player.getInventory().setItemInOffHand(item);
-            else player.getInventory().setItemInMainHand(item);
+            player.getInventory().setItemInMainHand(itemStack);
         }
         player.getWorld().playSound(player.getLocation(), Sound.ITEM_TRIDENT_RETURN, 0.6f, 1.4f);
-        // 不往聊天刷道具名 (避免"聊天框显示太多物品代码"), 改用 ActionBar 即时反馈
         try {
-            String name = LegacyComponentSerializer.legacyAmpersand().deserialize(def.name)
-                    .toString().replace("§", "");
-            player.sendActionBar(net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
-                    .legacyAmpersand().deserialize("§e使用: " + def.name));
-        } catch (Throwable ignored) {}
+            String string = LegacyComponentSerializer.legacyAmpersand().deserialize(specialDef.name).toString().replace("\u00a7", "");
+            player.sendActionBar((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7e\u4f7f\u7528: " + specialDef.name));
+        }
+        catch (Throwable throwable) {
+            // empty catch block
+        }
         return true;
     }
 
-    // ==================== 具体效果 ====================
-
-    /** 火焰弹砸地: 自动锁定附近敌人落点, 不伤自己, 对范围内其他玩家 0.5 心伤害 + TNT级炸飞 */
-    private void fireball(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        // 玩家线程缓存位置与UUID (避免 region 线程跨区域读实体状态)
-        final Location playerLoc = player.getLocation();
-        final UUID myId = player.getUniqueId();
-        // 目标点: 玩家准星方向延伸 focusDist 格处的探针 (纯坐标, 不读方块)
-        Location probe = aimPoint(player, def.radius * 3.0 + 6);
-        w.playSound(player.getLocation(), Sound.ENTITY_GHAST_SHOOT, 1.0f, 1.0f);
-        final Location impactBase = probe.clone();
-
-        // 玩家区域线程查找附近敌人 (自动锁定), 决定落点
-        Bukkit.getRegionScheduler().run(plugin, playerLoc, t -> {
-            int lockRadius = (int) (def.radius + 6);
-            Entity target = findNearestEnemy(w, playerLoc, myId, lockRadius);
-            final Location aimImpact = target != null ? target.getLocation() : impactBase;
-            // 落点区域线程执行爆炸
-            Bukkit.getRegionScheduler().run(plugin, aimImpact, t2 -> {
-                // 向下找地表
-                Location found = findGround(w, aimImpact);
-                final Location impact = found != null ? found : aimImpact;
-                // 粒子轨迹: 从玩家位置上方向目标点
-                Location from = playerLoc.clone().add(0, 2, 0);
-                spawnParticleLine(w, from, impact, Particle.FLAME, 24);
-                spawnParticleLine(w, from, impact, Particle.LARGE_SMOKE, 12);
-                // 爆炸
-                w.playSound(impact, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 1.0f);
-                w.spawnParticle(Particle.EXPLOSION_EMITTER, impact, 1);
-                w.spawnParticle(Particle.FLAME, impact, 40, 0.5, 0.5, 0.5, 0.02);
-                // 范围: 对范围内非使用者玩家造成 0.5 心伤害 + TNT 炸飞
-                double r = def.radius;
-                for (Entity e : w.getNearbyEntities(impact, r, r, r)) {
-                    if (!(e instanceof LivingEntity le)) continue;
-                    if (le instanceof Player p && p.getUniqueId().equals(myId)) continue; // 不伤自己
-                    if (!withinRadius(le.getLocation(), impact, r)) continue;
-                    double dist = le.getLocation().distance(impact);
-                    double factor = Math.max(0.2, 1.0 - dist / Math.max(1.0, r));
-                    // 伤害: 半心 (0.5) —— 不致死, 仅结算用
-                    le.getScheduler().run(plugin, s -> {
-                        le.damage(0.5);
-                        // TNT 级炸飞
-                        Vector dir = le.getLocation().toVector().subtract(impact.toVector());
-                        if (dir.lengthSquared() < 0.001) dir = new Vector(0, 1, 0);
-                        dir.normalize();
-                        double up = 0.8 + factor * 0.7;
-                        le.setVelocity(dir.multiply(def.velocity * factor + 0.4)
-                                .setY(up + def.velocity * factor * 0.6));
-                        le.setFireTicks(Math.max(0, le.getFireTicks() + 20));
+    private void fireball(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        Location location = player.getLocation();
+        UUID uUID = player.getUniqueId();
+        Location location2 = this.aimPoint(player, specialDef.radius * 3.0 + 6.0);
+        world.playSound(player.getLocation(), Sound.ENTITY_GHAST_SHOOT, 1.0f, 1.0f);
+        Location location3 = location2.clone();
+        Bukkit.getRegionScheduler().run((Plugin)this.plugin, location, scheduledTask -> {
+            int n = (int)(specialDef.radius + 6.0);
+            Entity entity = this.findNearestEnemy(world, location, uUID, n);
+            Location location3 = entity != null ? entity.getLocation() : location3;
+            Bukkit.getRegionScheduler().run((Plugin)this.plugin, location3, scheduledTask2 -> {
+                Location location3 = this.findGround(world, location3);
+                Location location4 = location3 != null ? location3 : location3;
+                Location location5 = location.clone().add(0.0, 2.0, 0.0);
+                this.spawnParticleLine(world, location5, location4, Particle.FLAME, 24);
+                this.spawnParticleLine(world, location5, location4, Particle.LARGE_SMOKE, 12);
+                world.playSound(location4, Sound.ENTITY_GENERIC_EXPLODE, 1.2f, 1.0f);
+                world.spawnParticle(Particle.EXPLOSION_EMITTER, location4, 1);
+                world.spawnParticle(Particle.FLAME, location4, 40, 0.5, 0.5, 0.5, 0.02);
+                double d = specialDef.radius;
+                for (Entity entity : world.getNearbyEntities(location4, d, d, d)) {
+                    Player player;
+                    LivingEntity livingEntity;
+                    if (!(entity instanceof LivingEntity) || (livingEntity = (LivingEntity)entity) instanceof Player && (player = (Player)livingEntity).getUniqueId().equals(uUID) || !this.withinRadius(livingEntity.getLocation(), location4, d)) continue;
+                    double d2 = livingEntity.getLocation().distance(location4);
+                    double d3 = Math.max(0.2, 1.0 - d2 / Math.max(1.0, d));
+                    livingEntity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                        livingEntity.damage(0.5);
+                        Vector vector = livingEntity.getLocation().toVector().subtract(location4.toVector());
+                        if (vector.lengthSquared() < 0.001) {
+                            vector = new Vector(0, 1, 0);
+                        }
+                        vector.normalize();
+                        double d2 = 0.8 + d3 * 0.7;
+                        livingEntity.setVelocity(vector.multiply(specialDef.velocity * d3 + 0.4).setY(d2 + specialDef.velocity * d3 * 0.6));
+                        livingEntity.setFireTicks(Math.max(0, livingEntity.getFireTicks() + 20));
                     }, () -> {});
                 }
             });
         });
     }
 
-    /** 治疗: 范围回血 */
-    private void heal(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        Location loc = player.getLocation();
-        w.playSound(loc, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.4f);
-        w.spawnParticle(Particle.HEART, loc.add(0, 1, 0), 20, 1, 1, 1, 0);
-        for (Entity e : w.getNearbyEntities(loc, def.radius, def.radius, def.radius)) {
-            if (!(e instanceof LivingEntity le)) continue;
-            if (!withinRadius(le.getLocation(), loc, def.radius)) continue;
-            le.getScheduler().run(plugin, s -> {
-                double amount = 4.0 + ThreadLocalRandom.current().nextDouble(4.0);
-                if (le instanceof Player p) {
-                    double nh = Math.min(p.getMaxHealth(), p.getHealth() + amount);
-                    p.setHealth(nh);
-                } else if (le.getHealth() < le.getMaxHealth()) {
-                    le.setHealth(Math.min(le.getMaxHealth(), le.getHealth() + amount));
+    private void heal(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        Location location = player.getLocation();
+        world.playSound(location, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.4f);
+        world.spawnParticle(Particle.HEART, location.add(0.0, 1.0, 0.0), 20, 1.0, 1.0, 1.0, 0.0);
+        for (Entity entity : world.getNearbyEntities(location, specialDef.radius, specialDef.radius, specialDef.radius)) {
+            LivingEntity livingEntity;
+            if (!(entity instanceof LivingEntity) || !this.withinRadius((livingEntity = (LivingEntity)entity).getLocation(), location, specialDef.radius)) continue;
+            livingEntity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                double d = 4.0 + ThreadLocalRandom.current().nextDouble(4.0);
+                if (livingEntity instanceof Player) {
+                    Player player = (Player)livingEntity;
+                    double d2 = Math.min(player.getMaxHealth(), player.getHealth() + d);
+                    player.setHealth(d2);
+                } else if (livingEntity.getHealth() < livingEntity.getMaxHealth()) {
+                    livingEntity.setHealth(Math.min(livingEntity.getMaxHealth(), livingEntity.getHealth() + d));
                 }
             }, () -> {});
         }
     }
 
-    /** 雷击: 自动锁定准星范围/附近最近的敌人, 落雷到其头上 (无目标则落准星地面) */
-    private void lightning(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        final UUID myId = player.getUniqueId();
-        // 玩家位置缓存 (region 回调不跨区域读实体)
-        final Location playerLoc = player.getLocation();
-        Location probe = aimPoint(player, 30);
-        Location impactBase = probe.clone();
-
-        // 在玩家区域线程先查找附近最近敌人 (自动锁定), 再决定落雷点
-        Bukkit.getRegionScheduler().run(plugin, playerLoc, t -> {
-            int lockRadius = (int) (def.radius + 8);
-            Entity target = findNearestEnemy(w, playerLoc, myId, lockRadius);
-            final Location lockLoc = target != null ? target.getLocation() : impactBase;
-            // 目标点区域线程落雷
-            Bukkit.getRegionScheduler().run(plugin, lockLoc, t2 -> {
-                // 若锁定敌人, 雷落其头顶 (即使区块加载, 雷击特效只需坐标)
-                Location impact = lockLoc.clone();
-                if (target == null) {
-                    Location found = findGround(w, impactBase);
-                    impact = found != null ? found : impactBase;
+    private void lightning(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        UUID uUID = player.getUniqueId();
+        Location location = player.getLocation();
+        Location location2 = this.aimPoint(player, 30.0);
+        Location location3 = location2.clone();
+        Bukkit.getRegionScheduler().run((Plugin)this.plugin, location, scheduledTask -> {
+            int n = (int)(specialDef.radius + 8.0);
+            Entity entity = this.findNearestEnemy(world, location, uUID, n);
+            Location location3 = entity != null ? entity.getLocation() : location3;
+            Bukkit.getRegionScheduler().run((Plugin)this.plugin, location3, scheduledTask2 -> {
+                Location location3 = location3.clone();
+                if (entity == null) {
+                    Location location4 = this.findGround(world, location3);
+                    location3 = location4 != null ? location4 : location3;
                 } else {
-                    impact.setY(impact.getY() - 1); // 雷击特效落在敌人脚下地面
+                    location3.setY(location3.getY() - 1.0);
                 }
-                w.strikeLightningEffect(impact);
-                w.playSound(impact, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
-                double r = Math.max(2.5, def.radius);
-                for (Entity e : w.getNearbyEntities(impact, r, r, r)) {
-                    if (!(e instanceof LivingEntity le)) continue;
-                    if (le instanceof Player p && p.getUniqueId().equals(myId)) continue;
-                    if (!withinRadius(le.getLocation(), impact, r)) continue;
-                    le.getScheduler().run(plugin, s -> {
-                        le.damage(def.damage * 6);
-                        le.getWorld().strikeLightningEffect(le.getLocation());
+                world.strikeLightningEffect(location3);
+                world.playSound(location3, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
+                double d = Math.max(2.5, specialDef.radius);
+                for (Entity entity2 : world.getNearbyEntities(location3, d, d, d)) {
+                    Player player;
+                    LivingEntity livingEntity;
+                    if (!(entity2 instanceof LivingEntity) || (livingEntity = (LivingEntity)entity2) instanceof Player && (player = (Player)livingEntity).getUniqueId().equals(uUID) || !this.withinRadius(livingEntity.getLocation(), location3, d)) continue;
+                    livingEntity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                        livingEntity.damage(specialDef.damage * 6.0);
+                        livingEntity.getWorld().strikeLightningEffect(livingEntity.getLocation());
                     }, () -> {});
                 }
             });
         });
     }
 
-    /**
-     * 在玩家周围查找最近的非己方敌对目标 (其他玩家/敌对生物)
-     * 必须在玩家所属区域线程调用; 返回最近敌人实体, 无则 null
-     */
-    private Entity findNearestEnemy(World w, Location center, UUID myId, int radius) {
-        if (radius <= 0) return null;
-        Entity best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (Entity e : w.getNearbyEntities(center, radius, radius, radius)) {
-            if (!(e instanceof LivingEntity le)) continue;
-            if (le instanceof Player p && p.getUniqueId().equals(myId)) continue; // 跳过自己
-            double d = e.getLocation().distanceSquared(center);
-            if (d < bestDist) { bestDist = d; best = e; }
+    private Entity findNearestEnemy(World world, Location location, UUID uUID, int n) {
+        if (n <= 0) {
+            return null;
         }
-        return best;
+        Entity entity = null;
+        double d = Double.MAX_VALUE;
+        for (Entity entity2 : world.getNearbyEntities(location, (double)n, (double)n, (double)n)) {
+            double d2;
+            Player player;
+            LivingEntity livingEntity;
+            if (!(entity2 instanceof LivingEntity) || (livingEntity = (LivingEntity)entity2) instanceof Player && (player = (Player)livingEntity).getUniqueId().equals(uUID) || !((d2 = entity2.getLocation().distanceSquared(location)) < d)) continue;
+            d = d2;
+            entity = entity2;
+        }
+        return entity;
     }
 
-    /** 冰冻: 范围敌人减速+发光 */
-    private void freeze(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        Location loc = player.getLocation();
-        w.playSound(loc, Sound.BLOCK_GLASS_BREAK, 1.0f, 1.0f);
-        w.spawnParticle(Particle.SNOWFLAKE, loc.add(0, 1, 0), 40, def.radius, 1, def.radius, 0.01);
-        for (Entity e : w.getNearbyEntities(loc, def.radius, def.radius, def.radius)) {
-            if (!(e instanceof LivingEntity le)) continue;
-            if (le instanceof Player p && p.getUniqueId().equals(player.getUniqueId())) continue;
-            if (!withinRadius(le.getLocation(), loc, def.radius)) continue;
-            int durTicks = def.durationSeconds * 20;
-            le.getScheduler().run(plugin, s -> {
-                le.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, durTicks, 2));
-                le.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, durTicks, 0));
+    private void freeze(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        Location location = player.getLocation();
+        world.playSound(location, Sound.BLOCK_GLASS_BREAK, 1.0f, 1.0f);
+        world.spawnParticle(Particle.SNOWFLAKE, location.add(0.0, 1.0, 0.0), 40, specialDef.radius, 1.0, specialDef.radius, 0.01);
+        for (Entity entity : world.getNearbyEntities(location, specialDef.radius, specialDef.radius, specialDef.radius)) {
+            Player player2;
+            LivingEntity livingEntity;
+            if (!(entity instanceof LivingEntity) || (livingEntity = (LivingEntity)entity) instanceof Player && (player2 = (Player)livingEntity).getUniqueId().equals(player.getUniqueId()) || !this.withinRadius(livingEntity.getLocation(), location, specialDef.radius)) continue;
+            int n = specialDef.durationSeconds * 20;
+            livingEntity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                livingEntity.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, n, 2));
+                livingEntity.addPotionEffect(new PotionEffect(PotionEffectType.GLOWING, n, 0));
             }, () -> {});
         }
     }
 
-    /** 药水 buff: 对使用者 */
-    private void applyPotion(Player player, PotionEffectType type, SpecialDef def) {
-        int durTicks = def.durationSeconds * 20;
-        player.addPotionEffect(new PotionEffect(type, durTicks, 1));
+    private void applyPotion(Player player, PotionEffectType potionEffectType, SpecialDef specialDef) {
+        int n = specialDef.durationSeconds * 20;
+        player.addPotionEffect(new PotionEffect(potionEffectType, n, 1));
         player.getWorld().playSound(player.getLocation(), Sound.BLOCK_BEACON_POWER_SELECT, 1.0f, 1.4f);
-        player.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, player.getLocation().add(0, 1, 0), 15, 0.4, 0.5, 0.4, 0.01);
+        player.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, player.getLocation().add(0.0, 1.0, 0.0), 15, 0.4, 0.5, 0.4, 0.01);
     }
 
-    /** 掷出受控 TNT: 像弓箭一样抛物线飞向准星方向 (不伤自己)
-     *  掷出后碰到地面或实体时【瞬间引爆】 (不再等固定 fuse 时间) */
-    private void tntLaunch(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        // 玩家线程缓存位置与朝向 (region 回调不跨区域读实体)
-        final Location ploc = player.getLocation();
-        final Vector pdir = player.getLocation().getDirection();
-        final UUID thrower = player.getUniqueId();
-        Location spawn = ploc.clone().add(0, 1.4, 0);
-        Location spawnL = spawn.clone();
-        // 抛物线初速: 水平方向*力度 + 上仰分量 (受重力下坠形成弧线, 类似弓箭)
-        Vector vel = pdir.clone().multiply(2.2);
-        vel.setY(Math.max(0.5, pdir.getY() * 2.0 + 0.6)); // 上抛分量, 打出弧线
-        final Vector fvel = vel.clone().normalize().multiply(1.4); // 初始速度大小
-        Bukkit.getRegionScheduler().run(plugin, spawnL, t -> {
-            org.bukkit.entity.TNTPrimed tnt = (org.bukkit.entity.TNTPrimed) w.spawnEntity(spawnL,
-                    org.bukkit.entity.EntityType.TNT);
-            // 抛物线: 向上+向前初速, 重力下坠成弧线 (类似弓箭抛出)
-            tnt.setVelocity(fvel);
-            // 标记此 TNT 为"投掷型即时引爆" (PDC), 供碰撞检测识别
-            final org.bukkit.entity.TNTPrimed ftnt = tnt;
+    private void tntLaunch(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        Location location = player.getLocation();
+        Vector vector = player.getLocation().getDirection();
+        UUID uUID = player.getUniqueId();
+        Location location2 = location.clone().add(0.0, 1.4, 0.0);
+        Location location3 = location2.clone();
+        Vector vector2 = vector.clone().multiply(2.2);
+        vector2.setY(Math.max(0.5, vector.getY() * 2.0 + 0.6));
+        Vector vector3 = vector2.clone().normalize().multiply(1.4);
+        Bukkit.getRegionScheduler().run((Plugin)this.plugin, location3, scheduledTask2 -> {
+            TNTPrimed tNTPrimed = (TNTPrimed)world.spawnEntity(location3, EntityType.TNT);
+            tNTPrimed.setVelocity(vector3);
+            TNTPrimed tNTPrimed2 = tNTPrimed;
             try {
-                ftnt.getPersistentDataContainer().set(keyTntInstant, org.bukkit.persistence.PersistentDataType.STRING, "1");
-            } catch (Throwable ignore) {}
-            // 实体调度器: 每 2 tick 检测是否落到地面或砸到实体 → 立即引爆
-            ftnt.getScheduler().runAtFixedRate(plugin, tick -> {
+                tNTPrimed2.getPersistentDataContainer().set(this.keyTntInstant, PersistentDataType.STRING, (Object)"1");
+            }
+            catch (Throwable throwable) {
+                // empty catch block
+            }
+            tNTPrimed2.getScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> {
                 try {
-                    // 已引爆/已移除则停止
-                    if (!ftnt.isValid() || ftnt.isDead()) { tick.cancel(); return; }
-                    boolean detonate = false;
-                    // 落地 (onGround) → 引爆
-                    if (ftnt.isOnGround()) detonate = true;
-                    // 砸到实体 (附近 0.8 格内有活体且非抛出者/非其它TNT) → 引爆
-                    if (!detonate) {
-                        for (org.bukkit.entity.Entity e : ftnt.getNearbyEntities(0.8, 0.8, 0.8)) {
-                            if (!(e instanceof org.bukkit.entity.LivingEntity)) continue;
-                            if (e instanceof Player p2 && p2.getUniqueId().equals(thrower)) continue;
-                            detonate = true;
+                    if (!tNTPrimed2.isValid() || tNTPrimed2.isDead()) {
+                        scheduledTask.cancel();
+                        return;
+                    }
+                    boolean bl = false;
+                    if (tNTPrimed2.isOnGround()) {
+                        bl = true;
+                    }
+                    if (!bl) {
+                        for (Entity entity : tNTPrimed2.getNearbyEntities(0.8, 0.8, 0.8)) {
+                            Player player;
+                            if (!(entity instanceof LivingEntity) || entity instanceof Player && (player = (Player)entity).getUniqueId().equals(uUID)) continue;
+                            bl = true;
                             break;
                         }
                     }
-                    if (detonate) {
-                        tick.cancel();
-                        // 立即引爆: 倒计时设为 0, 走原版 TNT 爆炸逻辑 (瞬间爆开)
-                        ftnt.setFuseTicks(0);
-                        ftnt.getWorld().playSound(ftnt.getLocation(), Sound.ENTITY_TNT_PRIMED, 1.0f, 1.2f);
+                    if (bl) {
+                        scheduledTask.cancel();
+                        tNTPrimed2.setFuseTicks(0);
+                        tNTPrimed2.getWorld().playSound(tNTPrimed2.getLocation(), Sound.ENTITY_TNT_PRIMED, 1.0f, 1.2f);
                     }
-                } catch (Throwable ignore) { try { tick.cancel(); } catch (Throwable ignored) {} }
+                }
+                catch (Throwable throwable) {
+                    try {
+                        scheduledTask.cancel();
+                    }
+                    catch (Throwable throwable2) {
+                        // empty catch block
+                    }
+                }
             }, () -> {}, 1L, 2L);
         });
     }
 
-    /** 击退波: 把周围玩家炸飞 (不造成任何伤害) */
-    private void repulse(Player player, SpecialDef def) {
-        World w = player.getWorld();
-        Location loc = player.getLocation();
-        w.playSound(loc, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.8f);
-        w.spawnParticle(Particle.EXPLOSION, loc.add(0, 1, 0), 30, def.radius, 1, def.radius, 0.02);
-        for (Entity e : w.getNearbyEntities(loc, def.radius, def.radius, def.radius)) {
-            if (!(e instanceof LivingEntity le)) continue;
-            if (le instanceof Player p && p.getUniqueId().equals(player.getUniqueId())) continue;
-            if (!withinRadius(le.getLocation(), loc, def.radius)) continue;
-            double dist = le.getLocation().distance(loc);
-            double factor = Math.max(0.2, 1.0 - dist / Math.max(1.0, def.radius));
-            le.getScheduler().run(plugin, s -> {
-                Vector dir = le.getLocation().toVector().subtract(loc.toVector());
-                if (dir.lengthSquared() < 0.001) dir = new Vector(0, 1, 0);
-                dir.normalize();
-                le.setVelocity(dir.multiply(def.velocity * factor + 0.4).setY(0.7 + factor * 0.6));
+    private void repulse(Player player, SpecialDef specialDef) {
+        World world = player.getWorld();
+        Location location = player.getLocation();
+        world.playSound(location, Sound.ENTITY_GENERIC_EXPLODE, 1.0f, 0.8f);
+        world.spawnParticle(Particle.EXPLOSION, location.add(0.0, 1.0, 0.0), 30, specialDef.radius, 1.0, specialDef.radius, 0.02);
+        for (Entity entity : world.getNearbyEntities(location, specialDef.radius, specialDef.radius, specialDef.radius)) {
+            Player player2;
+            LivingEntity livingEntity;
+            if (!(entity instanceof LivingEntity) || (livingEntity = (LivingEntity)entity) instanceof Player && (player2 = (Player)livingEntity).getUniqueId().equals(player.getUniqueId()) || !this.withinRadius(livingEntity.getLocation(), location, specialDef.radius)) continue;
+            double d = livingEntity.getLocation().distance(location);
+            double d2 = Math.max(0.2, 1.0 - d / Math.max(1.0, specialDef.radius));
+            livingEntity.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                Vector vector = livingEntity.getLocation().toVector().subtract(location.toVector());
+                if (vector.lengthSquared() < 0.001) {
+                    vector = new Vector(0, 1, 0);
+                }
+                vector.normalize();
+                livingEntity.setVelocity(vector.multiply(specialDef.velocity * d2 + 0.4).setY(0.7 + d2 * 0.6));
             }, () -> {});
         }
     }
 
-    /**
-     * 追踪器: 随机锁定一名对局内存活敌人, 在其屏幕持续显示方向+距离 (持续 duration-seconds 秒)
-     * @return true=成功开始追踪(消费道具), false=无目标(不消费)
-     * 玩家区域线程调用 (由触发进入), 目标是纯玩家名单读取, 供后台任务持续刷新
-     */
-    private boolean track(Player player, SpecialDef def) {
-        UUID me = player.getUniqueId();
-        // 找到玩家所属房间 → 取该房间内存活玩家
-        GameManager g = plugin.rooms().roomOf(me);
-        List<UUID> alive = new ArrayList<>();
-        if (g != null) {
-            for (UUID u : g.inGamePlayers()) {
-                if (!u.equals(me) && !g.isEliminated(u)) alive.add(u);
+    private boolean track(Player player, SpecialDef specialDef) {
+        UUID uUID = player.getUniqueId();
+        GameManager gameManager = this.plugin.rooms().roomOf(uUID);
+        ArrayList<UUID> arrayList = new ArrayList<UUID>();
+        if (gameManager != null) {
+            for (UUID uUID2 : gameManager.inGamePlayers()) {
+                if (uUID2.equals(uUID) || gameManager.isEliminated(uUID2)) continue;
+                arrayList.add(uUID2);
             }
         }
-        if (alive.isEmpty()) {
-            player.sendActionBar(net.kyori.adventure.text.serializer.legacy
-                    .LegacyComponentSerializer.legacyAmpersand().deserialize("§c没有可追踪的敌人!"));
-            return false; // 不消费
+        if (arrayList.isEmpty()) {
+            player.sendActionBar((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7c\u6ca1\u6709\u53ef\u8ffd\u8e2a\u7684\u654c\u4eba!"));
+            return false;
         }
-        UUID prey = alive.get(ThreadLocalRandom.current().nextInt(alive.size()));
-        long durMs = Math.max(10, def.durationSeconds) * 1000L;
-        trackTargets.put(me, prey);
-        trackExpiry.put(me, System.currentTimeMillis() + durMs);
-        Player preyP = Bukkit.getPlayer(prey);
-        player.sendActionBar(net.kyori.adventure.text.serializer.legacy
-                .LegacyComponentSerializer.legacyAmpersand().deserialize(
-                "§e§l▣ 追踪开启! §7目标: §a" + (preyP != null ? preyP.getName() : "?")
-                + " §7持续 §e" + def.durationSeconds + " §7秒 (方向+距离实时显示)"));
-        try { player.getWorld().playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 1.4f); } catch (Throwable ignored) {}
-        return true; // 追踪已开启, 消费道具
+        UUID uUID3 = (UUID)arrayList.get(ThreadLocalRandom.current().nextInt(arrayList.size()));
+        long l = (long)Math.max(10, specialDef.durationSeconds) * 1000L;
+        this.trackTargets.put(uUID, uUID3);
+        this.trackExpiry.put(uUID, System.currentTimeMillis() + l);
+        Player player2 = Bukkit.getPlayer((UUID)uUID3);
+        player.sendActionBar((Component)LegacyComponentSerializer.legacyAmpersand().deserialize("\u00a7e\u00a7l\u25a3 \u8ffd\u8e2a\u5f00\u542f! \u00a77\u76ee\u6807: \u00a7a" + (player2 != null ? player2.getName() : "?") + " \u00a77\u6301\u7eed \u00a7e" + specialDef.durationSeconds + " \u00a77\u79d2 (\u65b9\u5411+\u8ddd\u79bb\u5b9e\u65f6\u663e\u793a)"));
+        try {
+            player.getWorld().playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 1.4f);
+        }
+        catch (Throwable throwable) {
+            // empty catch block
+        }
+        return true;
     }
 
-    // ==================== 工具 ====================
-
-    /** 玩家准星前方 focusDist 格处的探针坐标 (纯数学, 不读方块, 任意线程) */
-    private Location aimPoint(Player player, double focusDist) {
-        Location start = player.getEyeLocation();
-        Vector dir = start.getDirection();
-        return start.clone().add(dir.clone().multiply(focusDist));
+    private Location aimPoint(Player player, double d) {
+        Location location = player.getEyeLocation();
+        Vector vector = location.getDirection();
+        return location.clone().add(vector.clone().multiply(d));
     }
 
-    /** 从探针向下找地表 (必须在目标点所属 region 线程调用) */
-    private Location findGround(World w, Location probe) {
-        int x = probe.getBlockX(), z = probe.getBlockZ();
-        int y = Math.min(probe.getBlockY(), w.getMaxHeight() - 1);
-        int maxScan = 40;
-        for (int i = 0; i < maxScan && y > w.getMinHeight(); i++) {
-            if (!w.getBlockAt(x, y, z).getType().isAir()) {
-                return new Location(w, x + 0.5, y + 1, z + 0.5);
-            }
-            y--;
+    private Location findGround(World world, Location location) {
+        int n = location.getBlockX();
+        int n2 = location.getBlockZ();
+        int n3 = Math.min(location.getBlockY(), world.getMaxHeight() - 1);
+        int n4 = 40;
+        for (int i = 0; i < n4 && n3 > world.getMinHeight(); --n3, ++i) {
+            if (world.getBlockAt(n, n3, n2).getType().isAir()) continue;
+            return new Location(world, (double)n + 0.5, (double)(n3 + 1), (double)n2 + 0.5);
         }
         return null;
     }
 
-    private void spawnParticleLine(World w, Location a, Location b, Particle p, int count) {
-        if (a.getWorld() == null || b.getWorld() == null) return;
-        double dx = b.getX() - a.getX(), dy = b.getY() - a.getY(), dz = b.getZ() - a.getZ();
-        double len = Math.max(0.001, Math.sqrt(dx * dx + dy * dy + dz * dz));
-        for (int i = 0; i < count; i++) {
-            double t = i / (double) count;
-            Location pt = a.clone().add(dx * t, dy * t, dz * t);
-            w.spawnParticle(p, pt, 1, 0.05, 0.05, 0.05, 0.01);
+    private void spawnParticleLine(World world, Location location, Location location2, Particle particle, int n) {
+        if (location.getWorld() == null || location2.getWorld() == null) {
+            return;
+        }
+        double d = location2.getX() - location.getX();
+        double d2 = location2.getY() - location.getY();
+        double d3 = location2.getZ() - location.getZ();
+        double d4 = Math.max(0.001, Math.sqrt(d * d + d2 * d2 + d3 * d3));
+        for (int i = 0; i < n; ++i) {
+            double d5 = (double)i / (double)n;
+            Location location3 = location.clone().add(d * d5, d2 * d5, d3 * d5);
+            world.spawnParticle(particle, location3, 1, 0.05, 0.05, 0.05, 0.01);
         }
     }
 
-    private boolean withinRadius(Location a, Location center, double r) {
-        return a.distance(center) <= r;
+    private boolean withinRadius(Location location, Location location2, double d) {
+        return location.distance(location2) <= d;
+    }
+
+    public record SpecialDef(Material material, String key, String name, List<String> lore, String effect, double radius, double damage, double velocity, int durationSeconds) {
     }
 }

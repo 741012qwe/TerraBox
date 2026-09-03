@@ -1,5 +1,45 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.format.TextColor
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Location
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.Particle
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.block.BlockState
+ *  org.bukkit.block.Chest
+ *  org.bukkit.block.TileState
+ *  org.bukkit.configuration.file.YamlConfiguration
+ *  org.bukkit.persistence.PersistentDataType
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.LootAuditLogger;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import com.terrabox.TerrainType;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.io.File;
+import java.lang.invoke.CallSite;
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -7,516 +47,546 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.Chest;
 import org.bukkit.block.TileState;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.persistence.PersistentDataType;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.plugin.Plugin;
 
-import java.io.File;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
-
-/**
- * 物资箱管理: 随机陆地投放 / 注册表持久化 / 到期换位 / 搬空补货 / 粒子标记
- *
- * 线程模型 (白皮书 §4.3/§5.1):
- *  - 方块读写: 先 getChunkAtAsync 加载, 再 RegionScheduler 在归属区域线程执行
- *  - 注册表: CopyOnWriteArrayList (读多写少), 任意线程可读
- *  - 磁盘: AsyncScheduler 节流落盘
- *  - 广播: GlobalRegionScheduler
- */
 public class BoxManager {
     private final TerraBoxPlugin plugin;
     private final NamespacedKey keyRarity;
     private final NamespacedKey keyBorn;
     private final NamespacedKey keyAirdrop;
-
-    private final CopyOnWriteArrayList<BoxEntry> registry = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<BoxEntry> registry = new CopyOnWriteArrayList();
     private final AtomicBoolean saveQueued = new AtomicBoolean(false);
     private final AtomicBoolean loading = new AtomicBoolean(false);
-    /** 本批次已投放箱子计数, 每 BATCH_LOG_INTERVAL 条打印一条汇总日志 */
-    private final java.util.concurrent.atomic.AtomicInteger placedSinceBatchLog = new java.util.concurrent.atomic.AtomicInteger(0);
-    private static final int BATCH_LOG_INTERVAL = 20; // 每 20 个箱子打印一条汇总, 避免刷屏
+    private final AtomicInteger placedSinceBatchLog = new AtomicInteger(0);
+    private static final int BATCH_LOG_INTERVAL = 20;
     private ScheduledTask maintainTask;
     private ScheduledTask particleTask;
 
-    public BoxManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-        this.keyRarity = new NamespacedKey(plugin, "rarity");
-        this.keyBorn = new NamespacedKey(plugin, "born");
-        this.keyAirdrop = new NamespacedKey(plugin, "airdrop");
+    public BoxManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+        this.keyRarity = new NamespacedKey((Plugin)terraBoxPlugin, "rarity");
+        this.keyBorn = new NamespacedKey((Plugin)terraBoxPlugin, "born");
+        this.keyAirdrop = new NamespacedKey((Plugin)terraBoxPlugin, "airdrop");
     }
-
-    // ==================== 数据结构 ====================
-
-    public static final class BoxEntry {
-        public final int x, y, z;
-        public final Rarity rarity;
-        public final long born;
-        public final boolean airdrop;
-
-        public BoxEntry(int x, int y, int z, Rarity rarity, long born, boolean airdrop) {
-            this.x = x; this.y = y; this.z = z;
-            this.rarity = rarity; this.born = born; this.airdrop = airdrop;
-        }
-    }
-
-    // ==================== 生命周期 ====================
 
     public void start() {
-        loading.set(true);
-        Bukkit.getAsyncScheduler().runNow(plugin, t -> {
-            registry.addAll(loadRegistry());
-            plugin.getLogger().info("物资箱注册表加载完成: " + registry.size() + " 个");
-            loading.set(false);
+        this.loading.set(true);
+        Bukkit.getAsyncScheduler().runNow((Plugin)this.plugin, scheduledTask -> {
+            this.registry.addAll(this.loadRegistry());
+            this.plugin.getLogger().info("\u7269\u8d44\u7bb1\u6ce8\u518c\u8868\u52a0\u8f7d\u5b8c\u6210: " + this.registry.size() + " \u4e2a");
+            this.loading.set(false);
         });
-
-        long cycleTicks = 20L * 60L; // 每 60 秒维护一次
-        maintainTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
-                t -> maintain(), cycleTicks, cycleTicks);
-
-        if (plugin.getConfig().getBoolean("particles.enabled", true)) {
-            long pt = Math.max(20, plugin.getConfig().getInt("particles.interval-ticks", 60));
-            particleTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
-                    t -> spawnParticles(), pt, pt);
+        long l = 1200L;
+        this.maintainTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.maintain(), l, l);
+        if (this.plugin.getConfig().getBoolean("particles.enabled", true)) {
+            long l2 = Math.max(20, this.plugin.getConfig().getInt("particles.interval-ticks", 60));
+            this.particleTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.spawnParticles(), l2, l2);
         }
     }
 
     public void shutdown() {
-        if (maintainTask != null) maintainTask.cancel();
-        if (particleTask != null) particleTask.cancel();
-        // 确保最后一批日志被打印
-        int remaining = placedSinceBatchLog.getAndSet(0);
-        if (remaining > 0) {
-            plugin.getLogger().info("物资箱投放汇总: 最近 " + remaining + " 个箱子已登记");
+        int n;
+        if (this.maintainTask != null) {
+            this.maintainTask.cancel();
         }
-        saveRegistryNow(); // onDisable 同步落盘
+        if (this.particleTask != null) {
+            this.particleTask.cancel();
+        }
+        if ((n = this.placedSinceBatchLog.getAndSet(0)) > 0) {
+            this.plugin.getLogger().info("\u7269\u8d44\u7bb1\u6295\u653e\u6c47\u603b: \u6700\u8fd1 " + n + " \u4e2a\u7bb1\u5b50\u5df2\u767b\u8bb0");
+        }
+        this.saveRegistryNow();
     }
 
-    // ==================== 投放 ====================
-
-    /**
-     * 随机找一块陆地投放物资箱 (异步选点 → 区域线程放置)
-     * after: 放置成功回调 (Region 线程), 可为 null
-     */
-    public void spawnRandomBox(Rarity rarity, boolean airdrop, Consumer<BoxEntry> after) {
-        spawnRandomBox(rarity, airdrop, after, 0);
+    public void spawnRandomBox(Rarity rarity, boolean bl, Consumer<BoxEntry> consumer) {
+        this.spawnRandomBox(rarity, bl, consumer, 0);
     }
 
-    private void spawnRandomBox(Rarity rarity, boolean airdrop, Consumer<BoxEntry> after, int attempt) {
-        World w = plugin.worlds().world();
-        if (w == null) return;
-        int tries = Math.max(4, plugin.getConfig().getInt("spawn.tries", 10));
-
-        double edge = plugin.worlds().borderHalf();
-        int pad = Math.max(8, plugin.getConfig().getInt("boxes.edge-padding", 24));
-        double limit = Math.max(32, edge - pad);
-        int x = ThreadLocalRandom.current().nextInt((int) -limit, (int) limit + 1);
-        int z = ThreadLocalRandom.current().nextInt((int) -limit, (int) limit + 1);
-
-        double minDist = plugin.getConfig().getDouble("boxes.min-distance", 24.0);
-        if (tooClose(x, z, minDist)) {
-            retryOrGiveUp(rarity, airdrop, after, attempt, tries, "距离过近");
+    private void spawnRandomBox(Rarity rarity, boolean bl, Consumer<BoxEntry> consumer, int n) {
+        double d;
+        int n2;
+        World world = this.plugin.worlds().world();
+        if (world == null) {
             return;
         }
-
-        int cx = x >> 4, cz = z >> 4;
-        final int fx = x, fz = z, fa = attempt, ft = tries;
-        w.getChunkAtAsync(cx, cz).whenComplete((chunk, err) -> {
-            if (err != null) {
-                plugin.getLogger().warning("物资箱区块加载失败 (" + cx + "," + cz + "): " + err);
-                retryOrGiveUp(rarity, airdrop, after, fa, ft, "区块加载失败");
+        int n3 = Math.max(4, this.plugin.getConfig().getInt("spawn.tries", 10));
+        double d2 = this.plugin.worlds().borderHalf();
+        int n4 = Math.max(8, this.plugin.getConfig().getInt("boxes.edge-padding", 24));
+        double d3 = Math.max(32.0, d2 - (double)n4);
+        int n5 = ThreadLocalRandom.current().nextInt((int)(-d3), (int)d3 + 1);
+        if (this.tooClose(n5, n2 = ThreadLocalRandom.current().nextInt((int)(-d3), (int)d3 + 1), d = this.plugin.getConfig().getDouble("boxes.min-distance", 24.0))) {
+            this.retryOrGiveUp(rarity, bl, consumer, n, n3, "\u8ddd\u79bb\u8fc7\u8fd1");
+            return;
+        }
+        int n6 = n5 >> 4;
+        int n7 = n2 >> 4;
+        int n8 = n5;
+        int n9 = n2;
+        int n10 = n;
+        int n11 = n3;
+        world.getChunkAtAsync(n6, n7).whenComplete((chunk, throwable) -> {
+            if (throwable != null) {
+                this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u533a\u5757\u52a0\u8f7d\u5931\u8d25 (" + n6 + "," + n7 + "): " + String.valueOf(throwable));
+                this.retryOrGiveUp(rarity, bl, consumer, n10, n11, "\u533a\u5757\u52a0\u8f7d\u5931\u8d25");
                 return;
             }
-            // force load 保持区块(防 Folia 激进卸载), 再调度区域任务; 任务执行后解除
-            Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                try { w.setChunkForceLoaded(cx, cz, true); } catch (Throwable ignored) {}
-                Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                try {
+                    world.setChunkForceLoaded(n6, n7, true);
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, n6, n7, scheduledTask -> {
                     try {
-                        plugin.getLogger().info("物资箱放置任务执行: 尝试(" + fx + "," + fz + ")");
-                        tryPlace(w, fx, fz, rarity, airdrop, after, fa, ft);
-                    } catch (Throwable ex) {
-                        plugin.getLogger().warning("物资箱放置异常 (" + fx + "," + fz + "): " + ex);
-                        ex.printStackTrace(); // 完整堆栈定位 NPE 行
-                        retryOrGiveUp(rarity, airdrop, after, fa, ft, "放置异常");
-                    } finally {
-                        try { w.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
+                        this.plugin.getLogger().info("\u7269\u8d44\u7bb1\u653e\u7f6e\u4efb\u52a1\u6267\u884c: \u5c1d\u8bd5(" + n8 + "," + n9 + ")");
+                        this.tryPlace(world, n8, n9, rarity, bl, consumer, n10, n11);
+                    }
+                    catch (Throwable throwable) {
+                        this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u653e\u7f6e\u5f02\u5e38 (" + n8 + "," + n9 + "): " + String.valueOf(throwable));
+                        throwable.printStackTrace();
+                        this.retryOrGiveUp(rarity, bl, consumer, n10, n11, "\u653e\u7f6e\u5f02\u5e38");
+                    }
+                    finally {
+                        try {
+                            world.setChunkForceLoaded(n6, n7, false);
+                        }
+                        catch (Throwable throwable) {}
                     }
                 });
             });
         });
     }
 
-    /**
-     * 指定坐标放置物资箱 (出生广场等固定位置, 不检查开放地)
-     * after: 放置成功回调 (区域线程), 可为 null
-     */
-    public void spawnBoxAt(int x, int z, Rarity rarity, boolean airdrop, Consumer<BoxEntry> after) {
-        World w = plugin.worlds().world();
-        if (w == null) return;
-        int cx = x >> 4, cz = z >> 4;
-        w.getChunkAtAsync(cx, cz).whenComplete((chunk, err) -> {
-            if (err != null) {
-                plugin.getLogger().warning("固定物资箱区块加载失败 (" + cx + "," + cz + "): " + err);
+    public void spawnBoxAt(int n, int n2, Rarity rarity, boolean bl, Consumer<BoxEntry> consumer) {
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            return;
+        }
+        int n3 = n >> 4;
+        int n4 = n2 >> 4;
+        world.getChunkAtAsync(n3, n4).whenComplete((chunk, throwable) -> {
+            if (throwable != null) {
+                this.plugin.getLogger().warning("\u56fa\u5b9a\u7269\u8d44\u7bb1\u533a\u5757\u52a0\u8f7d\u5931\u8d25 (" + n3 + "," + n4 + "): " + String.valueOf(throwable));
                 return;
             }
-            Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                try { w.setChunkForceLoaded(cx, cz, true); } catch (Throwable ignored) {}
-                Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                try {
+                    world.setChunkForceLoaded(n3, n4, true);
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, n3, n4, scheduledTask -> {
                     try {
-                        tryPlaceAt(w, x, z, rarity, airdrop, after);
-                    } catch (Throwable ex) {
-                        plugin.getLogger().warning("固定物资箱放置异常 (" + x + "," + z + "): " + ex);
-                        ex.printStackTrace(); // 完整堆栈定位 NPE 行
-                    } finally {
-                        try { w.setChunkForceLoaded(cx, cz, false); } catch (Throwable ignored) {}
+                        this.tryPlaceAt(world, n, n2, rarity, bl, consumer);
+                    }
+                    catch (Throwable throwable) {
+                        this.plugin.getLogger().warning("\u56fa\u5b9a\u7269\u8d44\u7bb1\u653e\u7f6e\u5f02\u5e38 (" + n + "," + n2 + "): " + String.valueOf(throwable));
+                        throwable.printStackTrace();
+                    }
+                    finally {
+                        try {
+                            world.setChunkForceLoaded(n3, n4, false);
+                        }
+                        catch (Throwable throwable) {}
                     }
                 });
             });
         });
     }
 
-    private void retryOrGiveUp(Rarity rarity, boolean airdrop, Consumer<BoxEntry> after,
-                               int attempt, int tries, String reason) {
-        if (attempt < tries) {
-            Bukkit.getAsyncScheduler().runNow(plugin, t -> spawnRandomBox(rarity, airdrop, after, attempt + 1));
+    private void retryOrGiveUp(Rarity rarity, boolean bl, Consumer<BoxEntry> consumer, int n, int n2, String string) {
+        if (n < n2) {
+            Bukkit.getAsyncScheduler().runNow((Plugin)this.plugin, scheduledTask -> this.spawnRandomBox(rarity, bl, consumer, n + 1));
         } else {
-            plugin.getLogger().info("物资箱投放放弃(" + reason + ", 重试 " + attempt + " 次)");
+            this.plugin.getLogger().info("\u7269\u8d44\u7bb1\u6295\u653e\u653e\u5f03(" + string + ", \u91cd\u8bd5 " + n + " \u6b21)");
         }
     }
 
-    /** 区域线程: 校验地形并放置箱子 (随机投放版: 要求开放平地) */
-    private void tryPlace(World w, int x, int z, Rarity rarity, boolean airdrop,
-                          Consumer<BoxEntry> after, int attempt, int tries) {
-        if (!w.getWorldBorder().isInside(new Location(w, x, 64, z))) {
-            retryOrGiveUp(rarity, airdrop, after, attempt, tries, "越界");
+    private void tryPlace(World world, int n, int n2, Rarity rarity, boolean bl, Consumer<BoxEntry> consumer, int n3, int n4) {
+        if (!world.getWorldBorder().isInside(new Location(world, (double)n, 64.0, (double)n2))) {
+            this.retryOrGiveUp(rarity, bl, consumer, n3, n4, "\u8d8a\u754c");
             return;
         }
-        // 放在合适的地方: 要求周围 3x3 平坦开阔 (非陡坡/树/水)
-        if (!isOpenGround(w, x, z)) {
-            retryOrGiveUp(rarity, airdrop, after, attempt, tries, "地形不平坦");
+        if (!this.isOpenGround(world, n, n2)) {
+            this.retryOrGiveUp(rarity, bl, consumer, n3, n4, "\u5730\u5f62\u4e0d\u5e73\u5766");
             return;
         }
-        tryPlaceAt(w, x, z, rarity, airdrop, after);
+        this.tryPlaceAt(world, n, n2, rarity, bl, consumer);
     }
 
-    /** 区域线程: 指定坐标放置箱子 (公共主体) */
-    private void tryPlaceAt(World w, int x, int z, Rarity rarity, boolean airdrop, Consumer<BoxEntry> after) {
-        int gy = w.getHighestBlockYAt(x, z);
-        Block ground = w.getBlockAt(x, gy, z);
-        if (!validGround(ground)) {
+    private void tryPlaceAt(World world, int n, int n2, Rarity rarity, boolean bl, Consumer<BoxEntry> consumer) {
+        int n3 = world.getHighestBlockYAt(n, n2);
+        Block block = world.getBlockAt(n, n3, n2);
+        if (!this.validGround(block)) {
             return;
         }
-        int boxY = gy + 1;
-        Block boxBlock = w.getBlockAt(x, boxY, z);
-        if (!boxBlock.getType().isAir()) {
+        int n4 = n3 + 1;
+        Block block2 = world.getBlockAt(n, n4, n2);
+        if (!block2.getType().isAir()) {
             return;
         }
-        // 阶段1: 放箱子并重新获取 fresh Block (避免 stale Block 引用导致 getState/库存 NPE)
-        boxBlock.setType(Material.CHEST, false);
-        Block placed = w.getBlockAt(x, boxY, z);
-        if (!(placed.getState() instanceof Chest chest)) {
-            plugin.getLogger().warning("物资箱放置失败(" + x + "," + z + "): 箱子状态无效");
+        block2.setType(Material.CHEST, false);
+        Block block3 = world.getBlockAt(n, n4, n2);
+        BlockState blockState = block3.getState();
+        if (!(blockState instanceof Chest)) {
+            this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u653e\u7f6e\u5931\u8d25(" + n + "," + n2 + "): \u7bb1\u5b50\u72b6\u6001\u65e0\u6548");
             return;
         }
-        // 写 PDC + 自定义名 (先 update 写回, 让 tile 真正成为箱子)
-        PersistentDataContainer pdc = chest.getPersistentDataContainer();
-        long born = System.currentTimeMillis();
-        pdc.set(keyRarity, PersistentDataType.STRING, rarity.name());
-        pdc.set(keyBorn, PersistentDataType.LONG, born);
-        if (airdrop) pdc.set(keyAirdrop, PersistentDataType.BYTE, (byte) 1);
-        chest.customName(net.kyori.adventure.text.Component.text(
-                rarity.display + "物资箱", rarity.color));
+        Chest chest = (Chest)blockState;
+        blockState = chest.getPersistentDataContainer();
+        long l = System.currentTimeMillis();
+        blockState.set(this.keyRarity, PersistentDataType.STRING, (Object)rarity.name());
+        blockState.set(this.keyBorn, PersistentDataType.LONG, (Object)l);
+        if (bl) {
+            blockState.set(this.keyAirdrop, PersistentDataType.BYTE, (Object)1);
+        }
+        chest.customName((Component)Component.text((String)(rarity.display + "\u7269\u8d44\u7bb1"), (TextColor)rarity.color));
         chest.update();
-        // 阶段2: 重新获取 fresh state, 用实时方块库存填充战利品
-        // getBlockInventory() 是绑定世界 tile 的实时视图, 填充立即生效, 不再 update(避免快照覆盖清空)
-        if (!(w.getBlockAt(x, boxY, z).getState() instanceof Chest fresh)) {
-            plugin.getLogger().warning("物资箱状态刷新失败(" + x + "," + z + ")");
+        BlockState blockState2 = world.getBlockAt(n, n4, n2).getState();
+        if (!(blockState2 instanceof Chest)) {
+            this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u72b6\u6001\u5237\u65b0\u5931\u8d25(" + n + "," + n2 + ")");
             return;
         }
-        int filled = plugin.loot().fillInventory(fresh.getBlockInventory(), rarity);
-
-        // 先登记 registry + 聚合日志 (每 BATCH_LOG_INTERVAL 条箱子打印一次汇总, 避免刷屏)
-        BoxEntry entry = new BoxEntry(x, boxY, z, rarity, born, airdrop);
-        registry.add(entry);
-        markDirty();
-        int n = placedSinceBatchLog.incrementAndGet();
-        if (n % BATCH_LOG_INTERVAL == 0) {
-            // 每 20 条打印一次汇总, 并重置计数器
-            int batch = placedSinceBatchLog.getAndSet(0);
-            plugin.getLogger().info("物资箱投放汇总: 最近 " + batch + " 个箱子已登记");
-        } else if (n == 1) {
-            // 批次开始时不打印, 等凑齐 20 条再汇总
+        Chest chest2 = (Chest)blockState2;
+        int n5 = this.plugin.loot().fillInventory(chest2.getBlockInventory(), rarity);
+        BoxEntry boxEntry = new BoxEntry(n, n4, n2, rarity, l, bl);
+        this.registry.add(boxEntry);
+        this.markDirty();
+        int n6 = this.placedSinceBatchLog.incrementAndGet();
+        if (n6 % 20 == 0) {
+            int n7 = this.placedSinceBatchLog.getAndSet(0);
+            this.plugin.getLogger().info("\u7269\u8d44\u7bb1\u6295\u653e\u6c47\u603b: \u6700\u8fd1 " + n7 + " \u4e2a\u7bb1\u5b50\u5df2\u767b\u8bb0");
+        } else if (n6 == 1) {
+            // empty if block
         }
-
-        // 尾部审计 (辅助, 失败不影响箱子放置结果)
         try {
-            auditLootGeneration(filled);
-        } catch (Throwable auditEx) {
-            plugin.getLogger().warning("道具审计失败: " + auditEx);
+            this.auditLootGeneration(n5);
         }
-
-        if (airdrop) {
-            w.strikeLightningEffect(new Location(w, x + 0.5, boxY, z + 0.5));
+        catch (Throwable throwable) {
+            this.plugin.getLogger().warning("\u9053\u5177\u5ba1\u8ba1\u5931\u8d25: " + String.valueOf(throwable));
         }
-        if (after != null) after.accept(entry);
+        if (bl) {
+            world.strikeLightningEffect(new Location(world, (double)n + 0.5, (double)n4, (double)n2 + 0.5));
+        }
+        if (consumer != null) {
+            consumer.accept(boxEntry);
+        }
     }
 
-    /** 审计道具生成 (批次聚合, 只记录统计不逐条打印) */
-    private void auditLootGeneration(int totalStacks) {
-        plugin.lootAuditLogger().logBoxGeneration(LootAuditLogger.SYSTEM, totalStacks);
+    private void auditLootGeneration(int n) {
+        this.plugin.lootAuditLogger().logBoxGeneration(LootAuditLogger.SYSTEM, n);
     }
 
-    /** 开放平地校验: 默认周围 3x3 高度差 <=3 且有效地面; 原版生成世界(恶地等)放宽到 <=6 (地形崎岖)
-     *  (区域线程, 跨区块异常降级为不平坦) */
-    private boolean isOpenGround(World w, int x, int z) {
+    private boolean isOpenGround(World world, int n, int n2) {
         try {
-            boolean relaxed = false;
-            if (plugin.arenas() != null) {
-                TerrainType tt = plugin.arenas().terrainOf(w.getName());
-                relaxed = (tt == TerrainType.BADLANDS || tt == TerrainType.NORMAL
-                        || tt == TerrainType.NETHER || tt == TerrainType.THE_END);
+            boolean bl = false;
+            if (this.plugin.arenas() != null) {
+                TerrainType terrainType = this.plugin.arenas().terrainOf(world.getName());
+                bl = terrainType == TerrainType.BADLANDS || terrainType == TerrainType.NORMAL || terrainType == TerrainType.NETHER || terrainType == TerrainType.THE_END;
             }
-            int tolerance = relaxed ? 6 : 3;
-            int yCenter = w.getHighestBlockYAt(x, z);
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    int y = w.getHighestBlockYAt(x + dx, z + dz);
-                    if (Math.abs(y - yCenter) > tolerance) return false;
-                    Block g = w.getBlockAt(x + dx, y, z + dz);
-                    if (!validGround(g)) return false;
+            int n3 = bl ? 6 : 3;
+            int n4 = world.getHighestBlockYAt(n, n2);
+            for (int i = -1; i <= 1; ++i) {
+                for (int j = -1; j <= 1; ++j) {
+                    int n5 = world.getHighestBlockYAt(n + i, n2 + j);
+                    if (Math.abs(n5 - n4) > n3) {
+                        return false;
+                    }
+                    Block block = world.getBlockAt(n + i, n5, n2 + j);
+                    if (this.validGround(block)) continue;
+                    return false;
                 }
             }
             return true;
-        } catch (Throwable t) {
+        }
+        catch (Throwable throwable) {
             return false;
         }
     }
 
-    /** 陆地校验: 固体 + 排除树叶树干 + 排除液面冰面 */
-    private boolean validGround(Block b) {
-        if (b == null) return false; // getHighestBlockAt 可能返回 null(虚空/无方块列)
-        Material m = b.getType();
-        if (!m.isSolid()) return false;
-        String n = m.name();
-        if (n.contains("LEAVES") || n.contains("LOG") || n.contains("STEM")
-                || n.contains("WATER") || n.contains("ICE") || n.contains("LILY")) return false;
-        return true;
+    private boolean validGround(Block block) {
+        if (block == null) {
+            return false;
+        }
+        Material material = block.getType();
+        if (!material.isSolid()) {
+            return false;
+        }
+        String string = material.name();
+        return !string.contains("LEAVES") && !string.contains("LOG") && !string.contains("STEM") && !string.contains("WATER") && !string.contains("ICE") && !string.contains("LILY");
     }
 
-    private boolean tooClose(int x, int z, double minDist) {
-        double minSq = minDist * minDist;
-        for (BoxEntry e : registry) {
-            long dx = e.x - x, dz = e.z - z;
-            if (dx * dx + dz * dz < minSq) return true;
+    private boolean tooClose(int n, int n2, double d) {
+        double d2 = d * d;
+        for (BoxEntry boxEntry : this.registry) {
+            long l = boxEntry.x - n;
+            long l2 = boxEntry.z - n2;
+            if (!((double)(l * l + l2 * l2) < d2)) continue;
+            return true;
         }
         return false;
     }
 
-    // ==================== 维护 ====================
-
-    /** Global 线程: 到期换位 + 数量补充 + 失效自愈 */
     private void maintain() {
-        World w = plugin.worlds().world();
-        if (w == null || loading.get()) return;
-        long refreshMs = plugin.getConfig().getLong("boxes.refresh-minutes", 45) * 60_000L;
-        long now = System.currentTimeMillis();
-        List<BoxEntry> expired = new ArrayList<>();
-        for (BoxEntry e : registry) {
-            if (now - e.born > refreshMs) expired.add(e);
+        int n;
+        World world = this.plugin.worlds().world();
+        if (world == null || this.loading.get()) {
+            return;
         }
-        // 每周期最多处理 30 个过期箱, 防止停机后一次性加载大量区块
-        int cap = Math.min(30, expired.size());
-        for (int i = 0; i < cap; i++) {
-            BoxEntry e = expired.get(i);
-            removeBoxAt(w, e, () -> {
-                if (plugin.getConfig().getBoolean("boxes.refill-on-open", true))
-                    spawnRandomBox(e.rarity, false, null);
+        long l = this.plugin.getConfig().getLong("boxes.refresh-minutes", 45L) * 60000L;
+        long l2 = System.currentTimeMillis();
+        ArrayList<BoxEntry> arrayList = new ArrayList<BoxEntry>();
+        for (BoxEntry boxEntry : this.registry) {
+            if (l2 - boxEntry.born <= l) continue;
+            arrayList.add(boxEntry);
+        }
+        int n2 = Math.min(30, arrayList.size());
+        for (n = 0; n < n2; ++n) {
+            BoxEntry boxEntry = (BoxEntry)arrayList.get(n);
+            this.removeBoxAt(world, boxEntry, () -> {
+                if (this.plugin.getConfig().getBoolean("boxes.refill-on-open", true)) {
+                    this.spawnRandomBox(boxEntry.rarity, false, null);
+                }
             });
         }
-        int refill = Math.min(plugin.boxRefillPerCycle(),
-                plugin.boxMaxCount() - registry.size());
-        for (int i = 0; i < refill; i++) {
-            spawnRandomBox(plugin.weightedPickForWorld(), false, null);
+        n = Math.min(this.plugin.boxRefillPerCycle(), this.plugin.boxMaxCount() - this.registry.size());
+        for (int i = 0; i < n; ++i) {
+            this.spawnRandomBox(this.plugin.weightedPickForWorld(), false, null);
         }
     }
 
-    /** 区域线程调用: 判断方块是否为注册物资箱 (纯 PDC 读取, 不写注册表) */
     public BoxEntry registeredAt(Block block) {
-        if (block.getType() != Material.CHEST) return null;
-        if (!(block.getState() instanceof TileState ts)) return null;
-        PersistentDataContainer pdc = ts.getPersistentDataContainer();
-        String r = pdc.get(keyRarity, PersistentDataType.STRING);
-        if (r == null) return null;
-        Rarity rarity = Rarity.parse(r);
-        if (rarity == null) return null;
-        long born = pdc.getOrDefault(keyBorn, PersistentDataType.LONG, 0L);
-        boolean airdrop = pdc.getOrDefault(keyAirdrop, PersistentDataType.BYTE, (byte) 0) == (byte) 1;
-        Location loc = block.getLocation();
-        return new BoxEntry(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(), rarity, born, airdrop);
+        if (block.getType() != Material.CHEST) {
+            return null;
+        }
+        BlockState blockState = block.getState();
+        if (!(blockState instanceof TileState)) {
+            return null;
+        }
+        TileState tileState = (TileState)blockState;
+        blockState = tileState.getPersistentDataContainer();
+        String string = (String)blockState.get(this.keyRarity, PersistentDataType.STRING);
+        if (string == null) {
+            return null;
+        }
+        Rarity rarity = Rarity.parse(string);
+        if (rarity == null) {
+            return null;
+        }
+        long l = (Long)blockState.getOrDefault(this.keyBorn, PersistentDataType.LONG, (Object)0L);
+        boolean bl = (Byte)blockState.getOrDefault(this.keyAirdrop, PersistentDataType.BYTE, (Object)0) == 1;
+        Location location = block.getLocation();
+        return new BoxEntry(location.getBlockX(), location.getBlockY(), location.getBlockZ(), rarity, l, bl);
     }
 
-    /** 搬空处理: 移除箱子并按需补货 (箱子所在区域线程) */
-    public void handleChestEmptied(Block block, BoxEntry entry) {
-        registry.removeIf(e -> e.x == entry.x && e.y == entry.y && e.z == entry.z);
-        markDirty();
+    public void handleChestEmptied(Block block, BoxEntry boxEntry) {
+        this.registry.removeIf(boxEntry2 -> boxEntry2.x == boxEntry.x && boxEntry2.y == boxEntry.y && boxEntry2.z == boxEntry.z);
+        this.markDirty();
         block.setType(Material.AIR, false);
-        if (plugin.getConfig().getBoolean("boxes.refill-on-open", true)) {
-            spawnRandomBox(entry.rarity, false, null);
+        if (this.plugin.getConfig().getBoolean("boxes.refill-on-open", true)) {
+            this.spawnRandomBox(boxEntry.rarity, false, null);
         }
     }
 
-    /** 异步安全移除: 先加载区块 → 区域线程拆除 */
-    private void removeBoxAt(World w, BoxEntry e, Runnable after) {
-        registry.removeIf(o -> o.x == e.x && o.y == e.y && o.z == e.z);
-        markDirty();
-        int cx = e.x >> 4, cz = e.z >> 4;
-        w.getChunkAtAsync(cx, cz).thenAccept(chunk ->
-                Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
-                    Block b = w.getBlockAt(e.x, e.y, e.z);
-                    if (b.getType() == Material.CHEST) {
-                        BoxEntry live = registeredAt(b);
-                        if (live != null && live.born == e.born) {
-                            // 拆箱前清空库存, 防止物品弹出
-                            if (b.getState() instanceof org.bukkit.block.Chest chest) {
-                                try { chest.getBlockInventory().clear(); } catch (Throwable ignored) {}
-                            }
-                            b.setType(Material.AIR, false);
-                            if (after != null) after.run();
+    private void removeBoxAt(World world, BoxEntry boxEntry, Runnable runnable) {
+        this.registry.removeIf(boxEntry2 -> boxEntry2.x == boxEntry.x && boxEntry2.y == boxEntry.y && boxEntry2.z == boxEntry.z);
+        this.markDirty();
+        int n = boxEntry.x >> 4;
+        int n2 = boxEntry.z >> 4;
+        world.getChunkAtAsync(n, n2).thenAccept(chunk -> Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, n, n2, scheduledTask -> {
+            BoxEntry boxEntry2;
+            Block block = world.getBlockAt(boxEntry.x, boxEntry.y, boxEntry.z);
+            if (block.getType() == Material.CHEST && (boxEntry2 = this.registeredAt(block)) != null && boxEntry2.born == boxEntry.born) {
+                BlockState blockState = block.getState();
+                if (blockState instanceof Chest) {
+                    Chest chest = (Chest)blockState;
+                    try {
+                        chest.getBlockInventory().clear();
+                    }
+                    catch (Throwable throwable) {
+                        // empty catch block
+                    }
+                }
+                block.setType(Material.AIR, false);
+                if (runnable != null) {
+                    runnable.run();
+                }
+            }
+        }));
+    }
+
+    public void wipeAll(Runnable runnable) {
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            return;
+        }
+        ArrayList<BoxEntry> arrayList = new ArrayList<BoxEntry>(this.registry);
+        this.registry.clear();
+        this.markDirty();
+        int[] nArray = new int[]{arrayList.size()};
+        if (arrayList.isEmpty()) {
+            if (runnable != null) {
+                runnable.run();
+            }
+            return;
+        }
+        for (BoxEntry boxEntry : arrayList) {
+            int n = boxEntry.x >> 4;
+            int n2 = boxEntry.z >> 4;
+            world.getChunkAtAsync(n, n2).thenAccept(chunk -> Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, n, n2, scheduledTask -> {
+                Object object;
+                Block block = world.getBlockAt(boxEntry.x, boxEntry.y, boxEntry.z);
+                if (block.getType() == Material.CHEST) {
+                    BlockState blockState = block.getState();
+                    if (blockState instanceof Chest) {
+                        object = (Chest)blockState;
+                        try {
+                            object.getBlockInventory().clear();
+                        }
+                        catch (Throwable throwable) {
+                            // empty catch block
                         }
                     }
-                }));
-    }
-
-    /** 清空全部物资箱 (管理命令, 异步逐个拆) */
-    public void wipeAll(Runnable done) {
-        World w = plugin.worlds().world();
-        if (w == null) return;
-        List<BoxEntry> snapshot = new ArrayList<>(registry);
-        registry.clear();
-        markDirty();
-        final int[] remain = {snapshot.size()};
-        if (snapshot.isEmpty()) { if (done != null) done.run(); return; }
-        for (BoxEntry e : snapshot) {
-            int cx = e.x >> 4, cz = e.z >> 4;
-            w.getChunkAtAsync(cx, cz).thenAccept(chunk ->
-                    Bukkit.getRegionScheduler().run(plugin, w, cx, cz, task -> {
-                        Block b = w.getBlockAt(e.x, e.y, e.z);
-                        if (b.getType() == Material.CHEST) {
-                            // 拆箱前先清空箱子库存, 防止战利品掉出 (拆箱(setType AIR)会把物品弹出)
-                            if (b.getState() instanceof org.bukkit.block.Chest chest) {
-                                try { chest.getBlockInventory().clear(); } catch (Throwable ignored) {}
-                            }
-                            b.setType(Material.AIR, false);
-                        }
-                        synchronized (remain) {
-                            if (--remain[0] <= 0 && done != null) done.run();
-                        }
-                    }));
+                    block.setType(Material.AIR, false);
+                }
+                object = nArray;
+                synchronized (nArray) {
+                    nArray[0] = nArray[0] - 1;
+                    if (nArray[0] <= 0 && runnable != null) {
+                        runnable.run();
+                    }
+                    // ** MonitorExit[var6_8 /* !! */ ] (shouldn't be in output)
+                    return;
+                }
+            }));
         }
     }
-
-    // ==================== 粒子 ====================
 
     private void spawnParticles() {
-        World w = plugin.worlds().world();
-        if (w == null) return;
-        List<Rarity> shown = new ArrayList<>();
-        for (String s : plugin.getConfig().getStringList("particles.rarities")) {
-            Rarity r = Rarity.parse(s);
-            if (r != null) shown.add(r);
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            return;
         }
-        if (shown.isEmpty()) return;
-        for (BoxEntry e : registry) {
-            if (!shown.contains(e.rarity)) continue;
-            Bukkit.getRegionScheduler().run(plugin, w, e.x >> 4, e.z >> 4, task -> {
-                Location loc = new Location(w, e.x + 0.5, e.y + 1.2, e.z + 0.5);
-                w.spawnParticle(Particle.END_ROD, loc, 3, 0.2, 0.3, 0.2, 0.01);
+        ArrayList<Rarity> arrayList = new ArrayList<Rarity>();
+        for (String object : this.plugin.getConfig().getStringList("particles.rarities")) {
+            Rarity rarity = Rarity.parse(object);
+            if (rarity == null) continue;
+            arrayList.add(rarity);
+        }
+        if (arrayList.isEmpty()) {
+            return;
+        }
+        for (BoxEntry boxEntry : this.registry) {
+            if (!arrayList.contains((Object)boxEntry.rarity)) continue;
+            Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, boxEntry.x >> 4, boxEntry.z >> 4, scheduledTask -> {
+                Location location = new Location(world, (double)boxEntry.x + 0.5, (double)boxEntry.y + 1.2, (double)boxEntry.z + 0.5);
+                world.spawnParticle(Particle.END_ROD, location, 3, 0.2, 0.3, 0.2, 0.01);
             });
         }
     }
 
-    // ==================== 查询 ====================
-
     public int count() {
-        return registry.size();
+        return this.registry.size();
     }
 
     public Map<Rarity, Integer> countByRarity() {
-        Map<Rarity, Integer> map = new EnumMap<>(Rarity.class);
-        for (BoxEntry e : registry) map.merge(e.rarity, 1, Integer::sum);
-        return map;
+        EnumMap<Rarity, Integer> enumMap = new EnumMap<Rarity, Integer>(Rarity.class);
+        for (BoxEntry boxEntry : this.registry) {
+            enumMap.merge(boxEntry.rarity, 1, Integer::sum);
+        }
+        return enumMap;
     }
 
-    /** 随机取一个指定稀有度的箱子 (寻宝用, 任意线程) */
-    public BoxEntry randomOf(List<Rarity> rarities) {
-        List<BoxEntry> pool = new ArrayList<>();
-        for (BoxEntry e : registry) if (rarities.contains(e.rarity)) pool.add(e);
-        if (pool.isEmpty()) return null;
-        return pool.get(ThreadLocalRandom.current().nextInt(pool.size()));
+    public BoxEntry randomOf(List<Rarity> list) {
+        ArrayList<BoxEntry> arrayList = new ArrayList<BoxEntry>();
+        for (BoxEntry boxEntry : this.registry) {
+            if (!list.contains((Object)boxEntry.rarity)) continue;
+            arrayList.add(boxEntry);
+        }
+        if (arrayList.isEmpty()) {
+            return null;
+        }
+        return (BoxEntry)arrayList.get(ThreadLocalRandom.current().nextInt(arrayList.size()));
     }
 
-    public World worldOf(BoxEntry e) {
-        return plugin.worlds().world();
+    public World worldOf(BoxEntry boxEntry) {
+        return this.plugin.worlds().world();
     }
-
-    // ==================== 注册表持久化 ====================
 
     private void markDirty() {
-        if (saveQueued.compareAndSet(false, true)) {
-            Bukkit.getAsyncScheduler().runDelayed(plugin, t -> {
-                saveQueued.set(false);
-                saveRegistryNow();
-            }, 3, java.util.concurrent.TimeUnit.SECONDS);
+        if (this.saveQueued.compareAndSet(false, true)) {
+            Bukkit.getAsyncScheduler().runDelayed((Plugin)this.plugin, scheduledTask -> {
+                this.saveQueued.set(false);
+                this.saveRegistryNow();
+            }, 3L, TimeUnit.SECONDS);
         }
     }
 
     private void saveRegistryNow() {
         try {
-            File file = new java.io.File(plugin.getDataFolder(), "boxes.yml");
-            if (!plugin.getDataFolder().exists()) plugin.getDataFolder().mkdirs();
-            org.bukkit.configuration.file.YamlConfiguration y =
-                    new org.bukkit.configuration.file.YamlConfiguration();
-            List<String> lines = new ArrayList<>();
-            for (BoxEntry e : registry) {
-                lines.add(e.x + ";" + e.y + ";" + e.z + ";" + e.rarity.name() + ";" + e.born
-                        + ";" + (e.airdrop ? 1 : 0));
+            File file = new File(this.plugin.getDataFolder(), "boxes.yml");
+            if (!this.plugin.getDataFolder().exists()) {
+                this.plugin.getDataFolder().mkdirs();
             }
-            y.set("boxes", lines);
-            y.save(file);
-        } catch (Exception ex) {
-            plugin.getLogger().warning("物资箱注册表保存失败: " + ex.getMessage());
+            YamlConfiguration yamlConfiguration = new YamlConfiguration();
+            ArrayList<CallSite> arrayList = new ArrayList<CallSite>();
+            for (BoxEntry boxEntry : this.registry) {
+                arrayList.add((CallSite)((Object)(boxEntry.x + ";" + boxEntry.y + ";" + boxEntry.z + ";" + boxEntry.rarity.name() + ";" + boxEntry.born + ";" + (boxEntry.airdrop ? 1 : 0))));
+            }
+            yamlConfiguration.set("boxes", arrayList);
+            yamlConfiguration.save(file);
+        }
+        catch (Exception exception) {
+            this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u6ce8\u518c\u8868\u4fdd\u5b58\u5931\u8d25: " + exception.getMessage());
         }
     }
 
     private List<BoxEntry> loadRegistry() {
-        List<BoxEntry> list = new ArrayList<>();
-        File file = new java.io.File(plugin.getDataFolder(), "boxes.yml");
-        if (!file.isFile()) return list;
-        try {
-            org.bukkit.configuration.file.YamlConfiguration y =
-                    org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
-            for (String line : y.getStringList("boxes")) {
-                try {
-                    String[] p = line.split(";");
-                    Rarity r = Rarity.parse(p[3]);
-                    if (r == null) continue;
-                    list.add(new BoxEntry(Integer.parseInt(p[0]), Integer.parseInt(p[1]),
-                            Integer.parseInt(p[2]), r, Long.parseLong(p[3 + 1]),
-                            p.length > 5 && "1".equals(p[5])));
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception ex) {
-            plugin.getLogger().warning("物资箱注册表加载失败: " + ex.getMessage());
+        ArrayList<BoxEntry> arrayList = new ArrayList<BoxEntry>();
+        File file = new File(this.plugin.getDataFolder(), "boxes.yml");
+        if (!file.isFile()) {
+            return arrayList;
         }
-        return list;
+        try {
+            YamlConfiguration yamlConfiguration = YamlConfiguration.loadConfiguration((File)file);
+            for (String string : yamlConfiguration.getStringList("boxes")) {
+                try {
+                    String[] stringArray = string.split(";");
+                    Rarity rarity = Rarity.parse(stringArray[3]);
+                    if (rarity == null) continue;
+                    arrayList.add(new BoxEntry(Integer.parseInt(stringArray[0]), Integer.parseInt(stringArray[1]), Integer.parseInt(stringArray[2]), rarity, Long.parseLong(stringArray[4]), stringArray.length > 5 && "1".equals(stringArray[5])));
+                }
+                catch (Exception exception) {}
+            }
+        }
+        catch (Exception exception) {
+            this.plugin.getLogger().warning("\u7269\u8d44\u7bb1\u6ce8\u518c\u8868\u52a0\u8f7d\u5931\u8d25: " + exception.getMessage());
+        }
+        return arrayList;
+    }
+
+    public static final class BoxEntry {
+        public final int x;
+        public final int y;
+        public final int z;
+        public final Rarity rarity;
+        public final long born;
+        public final boolean airdrop;
+
+        public BoxEntry(int n, int n2, int n3, Rarity rarity, long l, boolean bl) {
+            this.x = n;
+            this.y = n2;
+            this.z = n3;
+            this.rarity = rarity;
+            this.born = l;
+            this.airdrop = bl;
+        }
     }
 }

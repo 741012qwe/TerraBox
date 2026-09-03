@@ -1,85 +1,107 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  net.milkbowl.vault.economy.Economy
+ *  net.milkbowl.vault.economy.EconomyResponse
+ *  org.bukkit.OfflinePlayer
+ *  org.bukkit.plugin.RegisteredServiceProvider
+ */
 package com.terrabox;
 
+import com.terrabox.PlayerStore;
+import com.terrabox.TerraBoxPlugin;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
-/**
- * 经济层: 有 Vault 用 Vault, 没有则用内置积分 (PlayerStore.money)
- * 线程说明: 所有方法只做数据运算/ServicesManager 查询;
- *   Vault 调用发生在调用方所在的区域线程 (事件/命令线程), 满足白皮书归属规则。
- */
 public class Econ {
     private final TerraBoxPlugin plugin;
-    private net.milkbowl.vault.economy.Economy vault;
+    private Economy vault;
     private boolean tried = false;
 
-    public Econ(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public Econ(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    /** 尝试接入 Vault (onEnable 调用, Global/启动线程) */
     public void setup() {
-        if (tried) return;
-        tried = true;
+        if (this.tried) {
+            return;
+        }
+        this.tried = true;
         try {
-            if (!plugin.getConfig().getBoolean("economy.use-vault", true)) return;
-            if (plugin.getServer().getPluginManager().getPlugin("Vault") == null) return;
-            RegisteredServiceProvider<net.milkbowl.vault.economy.Economy> rsp =
-                    plugin.getServer().getServicesManager()
-                            .getRegistration(net.milkbowl.vault.economy.Economy.class);
-            if (rsp != null) {
-                vault = rsp.getProvider();
-                plugin.getLogger().info("经济: 已接入 Vault (" + vault.getName() + ")");
+            if (!this.plugin.getConfig().getBoolean("economy.use-vault", true)) {
+                return;
             }
-        } catch (Throwable t) {
-            vault = null;
-            plugin.getLogger().warning("Vault 经济接入失败, 回退内置积分: " + t.getMessage());
+            if (this.plugin.getServer().getPluginManager().getPlugin("Vault") == null) {
+                return;
+            }
+            RegisteredServiceProvider registeredServiceProvider = this.plugin.getServer().getServicesManager().getRegistration(Economy.class);
+            if (registeredServiceProvider != null) {
+                this.vault = (Economy)registeredServiceProvider.getProvider();
+                this.plugin.getLogger().info("\u7ecf\u6d4e: \u5df2\u63a5\u5165 Vault (" + this.vault.getName() + ")");
+            }
+        }
+        catch (Throwable throwable) {
+            this.vault = null;
+            this.plugin.getLogger().warning("Vault \u7ecf\u6d4e\u63a5\u5165\u5931\u8d25, \u56de\u9000\u5185\u7f6e\u79ef\u5206: " + throwable.getMessage());
         }
     }
 
     public boolean useVault() {
-        return vault != null;
+        return this.vault != null;
     }
 
     public String name() {
-        return useVault() ? "Vault" : "内置积分";
+        return this.useVault() ? "Vault" : "\u5185\u7f6e\u79ef\u5206";
     }
 
-    public double balance(OfflinePlayer p) {
-        if (vault != null) {
-            try { return vault.getBalance(p); } catch (Throwable t) { return 0; }
-        }
-        return plugin.players().getOrCreate(p.getUniqueId(), p.getName()).money();
-    }
-
-    /** 存款 (任意区域线程, 只操作数据) */
-    public void deposit(OfflinePlayer p, double amount) {
-        if (amount <= 0) return;
-        if (vault != null) {
+    public double balance(OfflinePlayer offlinePlayer) {
+        if (this.vault != null) {
             try {
-                net.milkbowl.vault.economy.EconomyResponse r = vault.depositPlayer(p, amount);
-                if (r != null && !r.transactionSuccess())
-                    plugin.getLogger().warning("Vault 存款失败: " + r.errorMessage);
+                return this.vault.getBalance(offlinePlayer);
+            }
+            catch (Throwable throwable) {
+                return 0.0;
+            }
+        }
+        return this.plugin.players().getOrCreate(offlinePlayer.getUniqueId(), offlinePlayer.getName()).money();
+    }
+
+    public void deposit(OfflinePlayer offlinePlayer, double d) {
+        if (d <= 0.0) {
+            return;
+        }
+        if (this.vault != null) {
+            try {
+                EconomyResponse economyResponse = this.vault.depositPlayer(offlinePlayer, d);
+                if (economyResponse != null && !economyResponse.transactionSuccess()) {
+                    this.plugin.getLogger().warning("Vault \u5b58\u6b3e\u5931\u8d25: " + economyResponse.errorMessage);
+                }
                 return;
-            } catch (Throwable t) {
-                plugin.getLogger().warning("Vault 存款异常, 回退内置积分: " + t.getMessage());
+            }
+            catch (Throwable throwable) {
+                this.plugin.getLogger().warning("Vault \u5b58\u6b3e\u5f02\u5e38, \u56de\u9000\u5185\u7f6e\u79ef\u5206: " + throwable.getMessage());
             }
         }
-        plugin.players().getOrCreate(p.getUniqueId(), p.getName()).addMoney(amount);
+        this.plugin.players().getOrCreate(offlinePlayer.getUniqueId(), offlinePlayer.getName()).addMoney(d);
     }
 
-    /** 取款, 余额不足返回 false (内置模式同步判定) */
-    public boolean withdraw(OfflinePlayer p, double amount) {
-        if (amount <= 0) return true;
-        if (vault != null) {
+    public boolean withdraw(OfflinePlayer offlinePlayer, double d) {
+        if (d <= 0.0) {
+            return true;
+        }
+        if (this.vault != null) {
             try {
-                net.milkbowl.vault.economy.EconomyResponse r = vault.withdrawPlayer(p, amount);
-                return r != null && r.transactionSuccess();
-            } catch (Throwable t) {
-                plugin.getLogger().warning("Vault 取款异常, 回退内置积分: " + t.getMessage());
+                EconomyResponse economyResponse = this.vault.withdrawPlayer(offlinePlayer, d);
+                return economyResponse != null && economyResponse.transactionSuccess();
+            }
+            catch (Throwable throwable) {
+                this.plugin.getLogger().warning("Vault \u53d6\u6b3e\u5f02\u5e38, \u56de\u9000\u5185\u7f6e\u79ef\u5206: " + throwable.getMessage());
             }
         }
-        PlayerStore.PlayerData d = plugin.players().getOrCreate(p.getUniqueId(), p.getName());
-        return d.takeMoney(amount);
+        PlayerStore.PlayerData playerData = this.plugin.players().getOrCreate(offlinePlayer.getUniqueId(), offlinePlayer.getName());
+        return playerData.takeMoney(d);
     }
 }

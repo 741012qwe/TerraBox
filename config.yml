@@ -3,28 +3,13 @@
 #   多世界 PVP 吃鸡 | 大厅 + 对局世界池
 # ================================================
 
-# ================================================
-#  数据库配置 (v2.3.0新增)
-#  type: 数据库类型 (sqlite/mysql/mariadb)
-#  SQLite: 默认, 单世界/小服务器推荐
-#  MySQL:  多世界/大型服务器推荐
-# ================================================
-database:
-  type: sqlite               # sqlite / mysql / mariadb
-  sqlite:
-    path: "database.db"      # 相对于插件数据目录
-  mysql:
-    url: "jdbc:mysql://localhost:3306/terrabox?useSSL=false&serverTimezone=UTC"
-    user: "root"
-    pass: ""
-
 world:
   name: "resource_land"        # 兼容旧资源世界名 (已废弃, 对局世界用 arena)
-  border-size: 1024.0          # 默认对局世界边界
+  border-size: 2048.0          # 默认对局世界边界 (2048x2048)
   seed: 0                      # 地图种子, 0 = 随机
   pregen: true                 # 自动预生成对局世界区块
-  pregen-batch: 60             # 每批预生成区块数 (60/tick = 1200区块/秒, 全异步不卡线程)
-  pregen-interval-ticks: 1     # 每批间隔 (tick); 1 tick = 1200区块/秒
+  pregen-batch: 5000           # 每批预生成区块数 (5000/tick = 100000区块/秒, 全异步不卡线程)
+  pregen-interval-ticks: 1     # 每批间隔 (tick); 1 tick = 5000区块/秒
   plain-radius: 120            # 中心平坦区半径 (格)
   base-height: 64              # 中心地表基准高度 (y)
   cover: true                  # 启用地形遮挡 (掩体/遮蔽结构)
@@ -42,35 +27,35 @@ lobby:
 
 # ================================================
 #  对局世界池 (多世界): 地形模板与数量
-#  size: 世界尺寸 (默认/沙漠/大岛屿均 1024x1024)
+#  size: 世界尺寸 (默认/沙漠/大岛屿均 2048x2048)
 #  worlds: 预创建的数量
 # ================================================
 arena:
   default:
-    size: 1024
+    size: 2048
     worlds: 1
   desert:
-    size: 1024
+    size: 2048
     worlds: 1
   islands:
-    size: 1024
+    size: 2048
     worlds: 1
     island-chance: 0.55        # 岛屿生成概率 (每个16x16宏区块)
   the_end:
-    size: 1024
+    size: 2048
     worlds: 1                  # 末地岛屿世界数量 (THE_END 环境, 黑色天空)
     island-chance: 0.42        # 外围浮空小岛生成概率 (每个16x16宏区块)
   badlands:
-    size: 1024
+    size: 2048
     worlds: 1                  # 恶地世界数量 (红沙+彩陶瓦层, 侵蚀平顶山)
   nether:
-    size: 1024
+    size: 2048
     worlds: 1                  # 下界世界数量 (NETHER 环境, 红色天空/岩浆湖)
   city:
-    size: 1024
+    size: 2048
     worlds: 1                  # 城市世界数量 (街道网格+建筑群+公园)
   normal:
-    size: 1056                 # 正常主世界尺寸 (1056x1056 边境墙/围墙)
+    size: 2048                 # 正常主世界尺寸 (2048x2048 边境墙/围墙)
     worlds: 1                  # 正常主世界数量 (多样地形+地狱/末地传送门)
   big-buildings: 3             # 大型物资建筑数量 (室内多个物资箱)
 
@@ -180,6 +165,7 @@ loot:
       - {material: FIREWORK_STAR, min: 1, max: 1, chance: 6, special: repulse_wave}
       - {material: SUGAR, min: 1, max: 1, chance: 6, special: speed_charge}
       - {material: RABBIT_FOOT, min: 1, max: 1, chance: 5, special: jump_charge}
+      # 合成材料 (低概率)
 
   RARE:
     weight: 27
@@ -204,6 +190,8 @@ loot:
       - {material: ICE, min: 1, max: 1, chance: 7, special: freeze_crystal}
       - {material: SHIELD, min: 1, max: 1, chance: 7, special: shield_charge}
       - {material: BLAZE_POWDER, min: 1, max: 1, chance: 6, special: fire_res_charge}
+      # 合成碎片 (中概率)
+      # 合成材料
 
   EPIC:
     weight: 15
@@ -230,6 +218,8 @@ loot:
       - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 5, artifact: celestial_blade}
       - {material: NETHERITE_AXE, min: 1, max: 1, chance: 4, artifact: aegis_axe}
       - {material: BOW, min: 1, max: 1, chance: 4, artifact: draco_bow}
+      # 合成碎片 (较高概率)
+      # 合成材料
 
   LEGENDARY:
     weight: 7
@@ -259,6 +249,8 @@ loot:
       - {material: NETHERITE_BOOTS, min: 1, max: 1, chance: 7, artifact: wind_boots}
       # 附魔石
       - {material: LAPIS_LAZULI, min: 1, max: 1, chance: 12, enchant-stone: normal}
+      # 合成碎片 (高概率)
+      # 合成材料
 
   MYTHIC:
     weight: 1
@@ -273,7 +265,7 @@ loot:
       - {material: SHULKER_BOX, min: 1, max: 1, chance: 30}
       - {material: EXPERIENCE_BOTTLE, min: 20, max: 40, chance: 80}
       - {material: BEACON, min: 1, max: 1, chance: 8}
-      # 自定义品质道具
+      # 自定义品质道具 (带 desc 与品质名, 按概率出现)
       - {material: NETHERITE_SWORD, min: 1, max: 1, chance: 15, enchants: {SHARPNESS: 5, LOOTING: 3, FIRE_ASPECT: 2}, name: "&6&l绝世之刃", lore: "&7这把剑曾斩落无数敌人。\n&7攻击速度:+1"}
       - {material: NETHERITE_AXE, min: 1, max: 1, chance: 10, enchants: {EFFICIENCY: 5, UNBREAKING: 3}, name: "&d&l开天巨斧", lore: "&7一斧劈开天地。\n&7挖掘速度:+2"}
       - {material: ELYTRA, min: 1, max: 1, chance: 5, enchants: {UNBREAKING: 3}, name: "&b&l苍穹之翼", lore: "&7翱翔天际的翅膀。\n&7飞行速度:+3"}
@@ -292,9 +284,26 @@ loot:
       # 附魔石 (绝世级必得高级石)
       - {material: AMETHYST_SHARD, min: 1, max: 1, chance: 25, enchant-stone: exotic}
       - {material: LAPIS_LAZULI, min: 1, max: 1, chance: 20, enchant-stone: normal}
+      # 合成碎片 (必得大量)
+      # 合成材料
 
 # ================================================
 #  特殊道具 (右键触发自定义效果)
+#  每种道具: material=承载材质, effect=效果类型, radius=作用半径,
+#            damage=伤害(半心=0.5), velocity=击退力度, duration-seconds=效果时长
+#  效果类型:
+#   FIREBALL    火焰弹砸地: 砸向准星前方地面, 不伤自己, 对范围内其他玩家造成
+#               半心(0.5)伤害, 并按原版 TNT 距离炸飞 (velocity 越高飞越远)
+#   HEAL        治疗: 范围内玩家回血 4~8 心
+#   LIGHTNING   雷击: 准星处落雷, 对范围内敌人伤害 (damage*6)
+#   SPEED       急速: 自己获得速度 buff
+#   JUMP        跳跃提升 buff
+#   FREEZE      冰冻: 范围内敌人减速+发光
+#   SHIELD      抗性提升 buff
+#   FIRE_RES    防火 buff
+#   TNT_LAUNCH  掷出受控 TNT (不伤自己)
+#   REPULSE     击退波: 把周围玩家炸飞 (不造成伤害)
+#  在战利品表 items 里用 special: <key> 引用, 即有概率开箱获得该特殊道具
 # ================================================
 special-items:
   fireball_tnt:
@@ -364,7 +373,7 @@ special-items:
   shield_charge:
     material: SHIELD
     effect: SHIELD
-    name: "&f&l护盾结晶"
+    name: "&f&l铁壁护盾"
     lore:
       - "&7右键使用, 获得抗性提升。"
       - "&7持续 10 秒。"
@@ -372,147 +381,259 @@ special-items:
   fire_res_charge:
     material: BLAZE_POWDER
     effect: FIRE_RES
-    name: "&c&l火焰抗性药水"
+    name: "&c&l烈焰抗性"
     lore:
-      - "&7右键使用, 获得防火buff。"
-      - "&7持续 20 秒。"
-    duration-seconds: 20
+      - "&7右键使用, 获得防火效果。"
+      - "&7持续 15 秒。"
+    duration-seconds: 15
   tnt_charge:
     material: TNT
     effect: TNT_LAUNCH
-    name: "&6&l投掷TNT"
+    name: "&6&l轰天炸药"
     lore:
-      - "&7右键朝准星方向投掷抛物线TNT。"
-      - "&7落地后爆炸, 炸飞范围内玩家。"
-    radius: 3.0
-    damage: 0.0
-    velocity: 1.0
+      - "&7右键掷出一枚不会伤及自己的 TNT。"
+      - "&7爆炸范围内快速逃开!"
+    radius: 5.0
   repulse_wave:
     material: FIREWORK_STAR
     effect: REPULSE
-    name: "&e&l击退波"
+    name: "&d&l冲击波"
     lore:
-      - "&7右键使用, 产生击退波。"
-      - "&7把周围玩家炸飞, 不造成伤害。"
-    radius: 8.0
-    damage: 0.0
-    velocity: 1.4
+      - "&7右键释放击退波, 把周围玩家炸飞。"
+      - "&7不造成伤害, 适合突围逃生。"
+    radius: 6.0
+    velocity: 2.0
+  enemy_tracker:
+    material: COMPASS
+    effect: TRACK
+    name: "&e&l追踪罗盘"
+    lore:
+      - "&7右键使用, 锁定一名随机存活敌人。"
+      - "&7在其头顶持续显示方向与距离 25 秒。"
+    duration-seconds: 25
 
 # ================================================
-#  神器配置 (自动生成的传说装备)
+#  地形装饰 (资源大陆风格)
+#  边界屏障墙 + 中心战场 + 四条主干道 + 四座瞭望塔
+# ================================================
+decorator:
+  enabled: true
+  batch-per-tick: 6            # 每 tick 提交的区块任务数
+  clear-center-radius: 30      # 中心战场清理半径 (清植被)
+  wall-height: 3               # 边界屏障墙基础高度
+  wall-extra-height: 6         # 边界墙额外加高 (防外围地形抬升越过边界)
+  tower-distance: 320          # 瞭望塔距中心距离
+  tower-rarity: EPIC           # 塔顶物资箱稀有度
+
+# ================================================
+#  对局玩法 (吃鸡式 PVP 资源争夺)
+#  模式: solo 单人(无PvP, 时间制积分结算, 任意人数可开) / pvp(淘汰制) / team(组队)
+#  流程: 报名 → 倒计时 → 出生广场聚集 → 搜刮/PvP → 仅剩1人 → 自动送大厅 → 恢复地形
+# ================================================
+game:
+  enabled: true
+  countdown-seconds: 30        # 开赛倒计时
+  duration-minutes: 30         # 对局时长上限 (单人按积分结算; 多人PVP/组队到时间按击杀/存活结算)
+  no-timeout: false            # true 则多人PVP/组队不设时间上限(纯淘汰制), 直到剩1人/1队
+  win-reward: 1000.0           # 胜者奖励 (Vault/内置积分)
+  team-count: 2                # 组队模式队伍数
+  min-players: 2               # 对战/组队最少参战人数 (单人模式任意人数)
+  tracker-grant-minutes: 10        # 对局超过该分钟数, 自动给每个存活玩家发一枚追踪器
+  spawn-area-radius: 7         # 出生广场半径(格), 对局玩家聚集点
+  spawn-area-box-rarity:       # 广场中央开局物资箱稀有度
+    - EPIC
+    - EPIC
+    - LEGENDARY
+    - LEGENDARY
+
+# ================================================
+#  毒圈 (Storm / 缩圈) —— 吃鸡安全区
+#  对局开始后整图安全, 每隔一段时间缩圈;
+#  圈外玩家持续受递增伤害, 迫使向圈内靠拢, 加速决战
+# ================================================
+storm:
+  enabled: true                # 启用毒圈
+  phases: 5                    # 收缩阶段数 (初始满图算第1阶段, 之后每阶段收缩一次)
+  initial-radius-factor: 0.95  # 初始安全区半径占地图半径的比例 (0.2~1.0)
+  shrink-factor: 0.6           # 每阶段新圈半径 = 旧圈半径 × 该系数 (越小收缩越狠)
+  wait-seconds: 60             # 每阶段停留时间 (秒), 到点开始收缩
+  shrink-duration-seconds: 40  # 收缩过渡时长 (秒), 圈从旧半径收到新半径
+  damage-per-second: 1.0       # 圈外每秒基础伤害 (半心计)
+  damage-increase-per-phase: 1.0  # 每阶段递增的额外每秒伤害
+  # --- 毒圈粒子特效 ---
+  particles-enabled: true         # 启用毒圈粒子特效
+  particles-interval-ticks: 4     # 粒子刷新间隔 (tick, 越小越流畅; 20 tick=1秒)
+  particles-boundary-enabled: true # 安全区边界线粒子
+  particles-boundary-density: 3    # 边界线每点粒子密度 (越多越密集)
+  particles-view-range: 48         # 只在该半径内生成边界粒子 (远处省性能)
+  particles-fog-enabled: true      # 圈外毒雾粒子
+  particles-fog-density: 1.0       # 毒雾浓度系数 (随阶段自动递增)
+
+# ================================================
+#  神器 —— 吃鸡终极装备 (传说/绝世箱子低概率掉落)
+#  material=承载材质  effect=效果类型  proc-chance=触发概率
+#  magnitude=效果强度  enchants=自带附魔
+#  效果类型:
+#   LIFESTEAL   攻击吸血
+#   VAMPIRIC    攻击大量吸血
+#   BLEED       攻击概率让目标流血+减速
+#   FROST       攻击概率冻结 (减速+发光)
+#   THORNS      受击反弹伤害 (护甲)
+#   SPEED       移速加成
+#   STRENGTH    攻击力加成
+#  在战利品表 items 里用 artifact: <key> 引用, 即有概率开箱获得神器
 # ================================================
 artifacts:
   celestial_blade:
-    name: "&6&l星辰之刃"
-    description: "&7传说武器, 附带火焰加成"
-    effect: "attack_damage +2, fire_aspect +1"
+    material: NETHERITE_SWORD
+    name: "&6&l苍穹之刃"
+    lore:
+      - "&7传说中斩落星辰的神剑。"
+      - "&7攻击吸血, 命中概率让目标流血。"
+    effect: LIFESTEAL
+    proc-chance: 0.30
+    magnitude: 1.0
+    enchants: {SHARPNESS: 5, UNBREAKING: 4, FIRE_ASPECT: 2}
   aegis_axe:
-    name: "&e&l神盾巨斧"
-    description: "&7重型武器, 附带击退"
-    effect: "attack_damage +3, knockback +2"
+    material: NETHERITE_AXE
+    name: "&c&l神盾重斧"
+    lore:
+      - "&7一斧可撼动山岳。"
+      - "&7高额攻击, 命中概率击退冻结。"
+    effect: FROST
+    proc-chance: 0.35
+    magnitude: 1.2
+    enchants: {SHARPNESS: 5, UNBREAKING: 4, EFFICIENCY: 5}
   draco_bow:
-    name: "&d&l龙息弓"
-    description: "&7传说弓, 附带穿透"
-    effect: "power +4, punch +2"
+    material: BOW
+    name: "&e&l屠龙圣弓"
+    lore:
+      - "&7箭无虚发, 箭箭索命。"
+      - "&7射出的箭附带火焰与高额伤害。"
+    effect: STRING
+    proc-chance: 0.40
+    magnitude: 1.0
+    enchants: {POWER: 5, FLAME: 2, INFINITY: 1, PUNCH: 2}
   titan_chest:
-    name: "&6&l泰坦胸甲"
-    description: "&7传说护甲, 附带抗性"
-    effect: "protection +4, durability +50%"
+    material: NETHERITE_CHESTPLATE
+    name: "&d&l泰坦铠甲"
+    lore:
+      - "&7坚不可摧的巨人护甲。"
+      - "&7受击反弹伤害, 大幅减伤。"
+    effect: THORNS
+    proc-chance: 0.25
+    magnitude: 2.0
+    enchants: {PROTECTION: 5, UNBREAKING: 4, THORNS: 3}
   wind_boots:
+    material: NETHERITE_BOOTS
     name: "&b&l疾风之靴"
-    description: "&7传说靴子, 附带速度"
-    effect: "speed +2, jump_boost +1"
+    lore:
+      - "&7如风般迅捷。"
+      - "&7大幅提升移动速度。"
+    effect: SPEED
+    proc-chance: 0.30
+    magnitude: 0.25
+    enchants: {PROTECTION: 4, FEATHER_FALLING: 4, UNBREAKING: 4}
   vampire_fang:
-    name: "&c&l吸血鬼獠牙"
-    description: "&7传说武器, 附带吸血"
-    effect: "lifesteal +3, attack_damage +2"
+    material: NETHERITE_AXE
+    name: "&d&l吸血獠牙"
+    lore:
+      - "&7饮血而猎, 愈战愈勇。"
+      - "&7每次攻击吸取生命。"
+    effect: VAMPIRIC
+    proc-chance: 0.35
+    magnitude: 1.2
+    enchants: {SHARPNESS: 5, UNBREAKING: 4, LOOTING: 3}
 
-# ==================== 毒圈配置 ====================
-storm:
+# ================================================
+#  附魔石 —— 从物资箱掉落, 右键对手持装备施加附魔
+#  (material=承载材质  name=名称  lore=描述  exotic=是否高级石)
+#  在战利品表 items 里用 enchant-stone: normal|exotic 引用随机附魔石
+# ================================================
+enchant-stones:
+  normal:
+    material: LAPIS_LAZULI
+    name: "&b&l附魔石"
+    lore:
+      - "&7鼠标拿取此石, 右键背包中的武器/工具/护甲即可附魔。"
+      - "&7目标需为可附魔装备 (剑/镐/斧/盔/胸/腿/靴/弓等)。"
+      - "&7消耗 1 枚附魔石, 随机施加对应附魔。"
+    exotic: false
+  exotic:
+    material: AMETHYST_SHARD
+    name: "&d&l稀有附魔石"
+    lore:
+      - "&7鼠标拿取此石, 右键背包中的武器/工具/护甲施加高级附魔。"
+      - "&7概率获得更高等级附魔, 适用于高等级装备强化。"
+    exotic: true
+
+# ================================================
+#  跨世界传送门 (正常主世界 ↔ 地狱 / 末地)
+#  主世界 (NORMAL) 出生广场附近放置地狱门/末地门, 走进去即传送
+#  地狱 (arena_nether) / 末地 (arena_the_end) 放置回主世界门
+#  offset-x/z: 传送门相对出生广场的偏移   radius: 传送触发半径
+#  target-<kind>: 目标世界名 (主机关的固定地狱/末地世界)
+# ================================================
+portals:
   enabled: true
-  phases: 5                              # 收缩次数 (共5次)
-  shrink-factor: 0.6                     # 每次收缩半径比例 (0.6 = 缩小40%)
-  wait-seconds: 60                       # 每圈停留时间 (秒)
-  shrink-duration-seconds: 40            # 收缩持续时间 (秒)
-  damage-per-second: 1.0                 # 基础伤害 (心/秒)
-  damage-increase-per-phase: 1.0         # 每阶段增加伤害 (心/秒)
-  initial-radius-factor: 0.95            # 初始圈半径比例 (相对地图边界)
+  offset-x: 0
+  offset-z: 120               # 出生广场北侧 120 格
+  radius: 3.0                 # 触发半径
+  target-nether: "arena_nether_1"
+  target-the_end: "arena_the_end_1"
+  target-normal: "arena_normal_1"
 
-  # 粒子效果
-  particles-enabled: true
-  particles-interval-ticks: 4
-  particles-boundary-enabled: true
-  particles-boundary-density: 3
-  particles-view-range: 48
-  particles-fog-enabled: true
-  particles-fog-density: 1.0
+# ================================================
+#  各世界战利品差异化 (不同世界箱子数量/品质不同)
+#  world-loot.<key>: 按地形类型键 (normal/desert/islands/the_end/badlands/nether/city/default)
+#    max-count: 箱子数量上限      initial-fill: 首批投放
+#    refill-per-cycle: 每周期补充  weight: 品质分布权重 (COMMON/RARE/EPIC/LEGENDARY/MYTHIC)
+#  未配置键回退 world-loot.default → 全局 boxes/loot 配置
+#  例: 正常主世界箱子少 + 品质低 (更基础), 沙漠/岛屿等特殊世界箱子多 + 品质高
+# ================================================
+world-loot:
+  normal:                     # 正常主世界: 箱子少 + 品质低 (基础世界)
+    max-count: 60
+    initial-fill: 40
+    refill-per-cycle: 3
+    weight: {COMMON: 65, RARE: 22, EPIC: 9, LEGENDARY: 3, MYTHIC: 1}   # 高品质极低
+  default:                    # 其余世界: 箱子多 + 品质高
+    max-count: 200
+    initial-fill: 150
+    refill-per-cycle: 8
+    weight: {COMMON: 50, RARE: 27, EPIC: 15, LEGENDARY: 7, MYTHIC: 1}
 
-# ==================== 消息配置 ====================
+
 messages:
-  # 通用消息
-  prefix: ""
-  no-permission: "&c你没有权限执行此命令。"
-  player-only: "&c此命令只能由玩家执行。"
-  not-ready: "&c系统正在初始化中, 请稍候..."
-  reloaded: "&a配置已重新加载。"
-
-  # 对局消息
-  game-started: "&e§l===== 对局开始 =====&r&e"
-  game-ending: "&e§l===== 对局结束 =====&r&e"
-  game-winner: "&e§l胜利者: &6%player%"
-  game-teams: "&e§l当前队伍人数: &6%solo=&r%solo% &e| &6pvp=&r%pvp% &e| &6team=&r%team%"
-  game-status: "&e当前对局状态: &6%state% &e| 存活: &6%alive%/%total%"
-  game-join: "&a你已成功加入对局! &e等待管理员开始。"
-  game-stop: "&c对局已停止。"
-
-  # 地形选择
-  terrain-selected: "&a已选择地形: &6%terrain% §7(世界: &e%world%§7)"
-  terrain-failed: "&c地形世界创建失败, 请检查控制台日志。"
-
-  # 箱子消息
-  box-distribution: "&e地图物资箱分布 (共 &a%count%§e 个):"
-  box-looted: "&a开箱成功! &e获得 %item% x%amount%"
-  box-emptied-self: "&e你的背包已满, 无法开箱。"
-  box-emptied-other: "&c其他玩家背包已满, 无法开箱。"
-  protected-block: "&c此方块受到保护, 无法破坏。"
-
-  # 狩猎消息
-  hunt-none: "&e附近没有可追踪的猎物。"
-  hunt-found: "&e发现猎物踪迹! &a追踪中..."
-
-  # 售卖消息
-  sell-empty: "&c背包中没有可售卖的物品。"
-  sell-done: "&a售卖成功! &e获得 &6%amount% &a金币"
-
-  # 重生消息
-  respawn-cooldown: "&e重生冷却中, 请等待 &6%seconds% &e秒..."
-  respawn-not-ready: "&c当前无法重生, 请稍候。"
-  respawn-found: "&a重生点已找到!"
-  respawn-fail: "&c重生点未找到, 请联系管理员。"
-
-  # 排行榜消息
-  top-header: "&e§l===== 排行榜 =====&r&e"
-  top-line: "&6%rank%. &e%player% &7- &a击杀:%kills% &c死亡:%deaths%"
-
-  # 毒圈消息
-  storm-start: "&e§l===== 毒圈启动 =====&r&e §7| §a第§e1§7/§a%{phase}% §7圈 §7停留§e%{seconds}§7秒后收缩"
-  storm-shrink: "&e§l===== 毒圈收缩 =====&r&e §7| §a第§e%{phase}% §7圈 §7开始收缩 §7持续§e%{seconds}§7秒"
-  storm-shrink-done: "&e§l===== 毒圈稳定 =====&r&e §7| §a第§e%{phase}% §7圈 §7收缩完成 §7接下来停留§e%{seconds}§7秒"
-  storm-outside: "&c你处于毒圈外! §7朝§e%direction%§7走§a%distance%§7格入圈"
-  storm-inside: "&a你在安全区内 §7距边界§e%distance%§7格"
-  storm-damage: "&c中毒! 受到§e%damage%§c点伤害"
-  killed-player: "&e你击杀了 &6%victim%"
-
-  # 房间消息
-  room-joined: "&a已加入房间 &6%room%"
-  room-left: "&c已离开房间。"
-  room-full: "&c房间已满员。"
-
-  # 空投消息
-  airdrop-caught: "&e空投已被你拾取!"
-  airdrop-failed: "&c空投掉落失败, 请重试。"
-
-  # 商店消息
-  shop-opened: "&e商店已打开"
-  shop-bought: "&a购买成功! &e获得 &6%item%"
-  shop-sold: "&a出售成功! &e获得 &6%amount% 金币"
+  prefix: "&8[&6物资大陆&8] &r"
+  no-permission: "&c你没有权限这么做。"
+  player-only: "&c该命令仅玩家可用。"
+  not-ready: "&c地图尚未生成完毕, 请稍等..."
+  respawn-found: "&a已传送到随机陆地出生点!"
+  respawn-fail: "&c附近没有找到合适的陆地, 请稍后再试。"
+  cooldown: "&c操作太频繁, 还需等待 &e{seconds} &c秒。"
+  box-opened: "&a你打开了{rarity}&a物资箱!"
+  box-emptied-self: "&e这个物资箱已经被搬空了!"
+  airdrop-placed: "&d&l空投来袭! &e传说物资箱已投放于 &b{world} &e(&a{x}&e, &a{z}&e), 全服争抢!"
+  mythic-placed: "&d&l绝世物资箱 &e出现在 &b{world} &e(&a{x}&e, &a{z}&e)!"
+  open-broadcast: "&e{player} &7打开了{rarity}&7物资箱!"
+  hunt-found: "&a寻宝成功: 目标箱子在&b{world} &e({direction}) &7直线约 &f{distance} &7米。"
+  hunt-none: "&c当前地图没有符合条件的物资箱, 货币已退回。"
+  sell-done: "&a回收成功! 共 &e{count} &a件物品, 获得 &e{money} &a元。"
+  sell-empty: "&c商店里没有可回收的物品。"
+  top-header: "&6===== 开箱排行榜 TOP10 ====="
+  top-line: "&e#{rank} &f{player} &7- 开箱 &a{count} &7次"
+  protected-block: "&c这是物资大陆的物资箱, 不能破坏!"
+  reloaded: "&a配置已重载。"
+  game-start: "&d&l对局即将开始! &f模式: &e{mode} &f| 参战: &a{count} &f人 | 倒计时 &e{seconds} &f秒"
+  game-countdown: "&e&l{seconds} &7秒后开始!"
+  game-running: "&a&l对局开始! &f模式: &e{mode} &f| 搜刮物资箱, 生存到最后! &7(单人模式 {minutes} 分钟结算)"
+  game-eliminated: "&c&l淘汰! &e{player} &7被淘汰, 剩余 &a{alive} &7人"
+  game-end: "&6&l对局结束!"
+  game-reset: "&a&l地图已自动重置! 物资箱已重新投放, 等待下一局!"
+  game-tracker-grant: "&e对局已进行 &a{minutes} &e分钟! &f为所有存活玩家发放 &a追踪罗盘 &f×1, 可右键锁定敌人追缉!"
+  storm-start: "&6&l毒圈启动! &7安全区已标记, &e1&7 阶段后将开始收缩."
+  storm-shrink: "&6&l毒圈收缩! &7第 &e{phase} &7阶段开始, 请前往安全区! ({seconds} 秒后完成)"
+  storm-shrink-done: "&6&l毒圈收缩完成! &7进入第 &e{phase} &7阶段, 圈外伤害提升!"
+  lobby-return: "&a你已返回大厅!"
+  eliminated-options: "&e用 &a/box lobby &e返回大厅, 或 &a/box spectate &e旁观剩余对战。"

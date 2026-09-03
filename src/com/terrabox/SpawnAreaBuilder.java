@@ -1,151 +1,171 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Location
+ *  org.bukkit.Material
+ *  org.bukkit.World
+ *  org.bukkit.block.Block
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.plugin.Plugin;
 
-import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
-
-/**
- * 出生广场 (地图中央 0,0): 对局玩家初始聚集点
- *  - 圆形石砖平台 (垫高填平自然地形)
- *  - 边缘火把/灯笼装饰
- *  - 中央开局物资箱 (高稀有度, 开局争抢)
- *  - 平台中心高度缓存, 供对局开始传送使用
- *
- * 线程模型: getChunkAtAsync → force load → RegionScheduler 区域线程铺方块
- */
 public class SpawnAreaBuilder {
     private final TerraBoxPlugin plugin;
     private volatile int centerY = 64;
     private volatile boolean built = false;
 
-    public SpawnAreaBuilder(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public SpawnAreaBuilder(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
     public int centerY() {
-        return centerY;
+        return this.centerY;
     }
 
     public boolean isBuilt() {
-        return built;
+        return this.built;
     }
 
-    /** 构建/重建出生广场 (任意线程, 异步链) */
-    public void build(Runnable done) {
-        World w = plugin.worlds().world();
-        if (w == null) { if (done != null) done.run(); return; }
-        int radius = Math.max(4, plugin.getConfig().getInt("game.spawn-area-radius", 7));
-        w.getChunkAtAsync(0, 0).whenComplete((chunk, err) -> {
-            if (err != null) {
-                plugin.getLogger().warning("出生广场区块加载失败: " + err);
-                if (done != null) done.run();
+    public void build(Runnable runnable) {
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            if (runnable != null) {
+                runnable.run();
+            }
+            return;
+        }
+        int n = Math.max(4, this.plugin.getConfig().getInt("game.spawn-area-radius", 7));
+        world.getChunkAtAsync(0, 0).whenComplete((chunk, throwable) -> {
+            if (throwable != null) {
+                this.plugin.getLogger().warning("\u51fa\u751f\u5e7f\u573a\u533a\u5757\u52a0\u8f7d\u5931\u8d25: " + String.valueOf(throwable));
+                if (runnable != null) {
+                    runnable.run();
+                }
                 return;
             }
-            Bukkit.getGlobalRegionScheduler().run(plugin, t -> {
-                try { w.setChunkForceLoaded(0, 0, true); } catch (Throwable ignored) {}
-                Bukkit.getRegionScheduler().run(plugin, w, 0, 0, task -> {
+            Bukkit.getGlobalRegionScheduler().run((Plugin)this.plugin, scheduledTask2 -> {
+                try {
+                    world.setChunkForceLoaded(0, 0, true);
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+                Bukkit.getRegionScheduler().run((Plugin)this.plugin, world, 0, 0, scheduledTask -> {
                     try {
-                        buildPlatform(w, radius);
-                        buildCenterBoxes(w);
-                        plugin.getLogger().info("出生广场已就绪: 半径 " + radius + ", 平台高 y=" + centerY);
-                    } catch (Throwable ex) {
-                        plugin.getLogger().warning("出生广场构建异常: " + ex);
-                    } finally {
-                        try { w.setChunkForceLoaded(0, 0, false); } catch (Throwable ignored) {}
+                        this.buildPlatform(world, n);
+                        this.buildCenterBoxes(world);
+                        this.plugin.getLogger().info("\u51fa\u751f\u5e7f\u573a\u5df2\u5c31\u7eea: \u534a\u5f84 " + n + ", \u5e73\u53f0\u9ad8 y=" + this.centerY);
                     }
-                    if (done != null) done.run();
+                    catch (Throwable throwable) {
+                        this.plugin.getLogger().warning("\u51fa\u751f\u5e7f\u573a\u6784\u5efa\u5f02\u5e38: " + String.valueOf(throwable));
+                    }
+                    finally {
+                        try {
+                            world.setChunkForceLoaded(0, 0, false);
+                        }
+                        catch (Throwable throwable) {}
+                    }
+                    if (runnable != null) {
+                        runnable.run();
+                    }
                 });
             });
         });
     }
 
-    /** 区域线程: 铺圆形平台 (垫高到中心高度, 表面平滑石) */
-    private void buildPlatform(World w, int radius) {
-        int y0 = w.getHighestBlockYAt(0, 0);
-        centerY = y0 + 1; // 平台表面高度
-        int r2 = (radius * radius + radius + 1);
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                if (dx * dx + dz * dz > r2) continue;
-                int y1 = w.getHighestBlockYAt(dx, dz);
-                // 垫高填平: 使用更丰富的方块组合，模拟MC原版地形
-                for (int y = y1 + 1; y <= y0; y++) {
-                    Block b = w.getBlockAt(dx, y, dz);
-                    if (b.getType().isAir() || !b.getType().isSolid()) {
-                        // 深度使用深板岩，中层使用石头，表层使用泥土
-                        if (y < y0 - 4) {
-                            b.setType(Material.DEEPSLATE, false);
-                        } else if (y < y0 - 2) {
-                            b.setType(Material.STONE, false);
-                        } else {
-                            b.setType(Material.DIRT, false);
-                        }
+    private void buildPlatform(World world, int n) {
+        int[][] nArrayArray;
+        Object object;
+        int n2;
+        int n3 = world.getHighestBlockYAt(0, 0);
+        this.centerY = n3 + 1;
+        int n4 = n * n + n + 1;
+        for (int i = -n; i <= n; ++i) {
+            for (int j = -n; j <= n; ++j) {
+                if (i * i + j * j > n4) continue;
+                n2 = world.getHighestBlockYAt(i, j);
+                for (int k = n2 + 1; k <= n3; ++k) {
+                    object = world.getBlockAt(i, k, j);
+                    if (!object.getType().isAir() && object.getType().isSolid()) continue;
+                    if (k < n3 - 4) {
+                        object.setType(Material.DEEPSLATE, false);
+                        continue;
                     }
+                    if (k < n3 - 2) {
+                        object.setType(Material.STONE, false);
+                        continue;
+                    }
+                    object.setType(Material.DIRT, false);
                 }
-                // 平台表面: 使用平滑石砖和石砖混合，棋盘格图案
-                Block surface = w.getBlockAt(dx, y0 + 1, dz);
-                if (dx == 0 && dz == 0) {
-                    surface.setType(Material.REDSTONE_BLOCK, false); // 中心标记
+                Block block = world.getBlockAt(i, n3 + 1, j);
+                if (i == 0 && j == 0) {
+                    block.setType(Material.REDSTONE_BLOCK, false);
+                } else if ((i + j) % 2 == 0) {
+                    block.setType(Material.SMOOTH_STONE, false);
                 } else {
-                    // 棋盘格图案
-                    if ((dx + dz) % 2 == 0) {
-                        surface.setType(Material.SMOOTH_STONE, false);
-                    } else {
-                        surface.setType(Material.STONE_BRICKS, false);
-                    }
+                    block.setType(Material.STONE_BRICKS, false);
                 }
-                // 移除表面以上残留(树/草等)
-                Block above2 = w.getBlockAt(dx, y0 + 2, dz);
-                if (above2.getType() != Material.AIR && !above2.getType().name().contains("TORCH")
-                        && !above2.getType().name().contains("LANTERN")) {
-                    above2.setType(Material.AIR, false);
-                }
+                object = world.getBlockAt(i, n3 + 2, j);
+                if (object.getType() == Material.AIR || object.getType().name().contains("TORCH") || object.getType().name().contains("LANTERN")) continue;
+                object.setType(Material.AIR, false);
             }
         }
-        // 边缘装饰: 使用火把和灯笼混合，增加多样性
-        int[][] dirs = {{-radius, 0}, {radius, 0}, {0, -radius}, {0, radius}};
-        for (int[] d : dirs) {
-            Block edge = w.getBlockAt(d[0], y0 + 2, d[1]);
-            if ((d[0] + d[1]) % 2 == 0) {
-                edge.setType(Material.TORCH, false);
-            } else {
-                edge.setType(Material.LANTERN, false);
+        int[][] nArrayArray2 = nArrayArray = new int[][]{{-n, 0}, {n, 0}, {0, -n}, {0, n}};
+        n2 = nArrayArray2.length;
+        for (int i = 0; i < n2; ++i) {
+            object = nArrayArray2[i];
+            Block block = world.getBlockAt((int)object[0], n3 + 2, (int)object[1]);
+            if ((object[0] + object[1]) % 2 == false) {
+                block.setType(Material.TORCH, false);
+                continue;
             }
+            block.setType(Material.LANTERN, false);
         }
     }
 
-    /** 区域线程: 中央开局物资箱 (高稀有度) */
-    private void buildCenterBoxes(World w) {
-        List<Rarity> rarities = new java.util.ArrayList<>();
-        for (String s : plugin.getConfig().getStringList("game.spawn-area-box-rarity")) {
-            Rarity r = Rarity.parse(s);
-            if (r != null) rarities.add(r);
+    private void buildCenterBoxes(World world) {
+        List<Object> list = new ArrayList();
+        for (String string : this.plugin.getConfig().getStringList("game.spawn-area-box-rarity")) {
+            Rarity rarity = Rarity.parse(string);
+            if (rarity == null) continue;
+            list.add((Object)rarity);
         }
-        if (rarities.isEmpty()) rarities = List.of(Rarity.EPIC, Rarity.EPIC, Rarity.LEGENDARY, Rarity.LEGENDARY);
-        int[][] offsets = {{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
-        for (int i = 0; i < Math.min(offsets.length, rarities.size()); i++) {
-            int bx = offsets[i][0], bz = offsets[i][1];
-            Rarity r = rarities.get(i);
-            // 中央箱子直接放平台表面
-            plugin.boxes().spawnBoxAt(bx, bz, r, false, null);
+        if (list.isEmpty()) {
+            list = List.of(Rarity.EPIC, Rarity.EPIC, Rarity.LEGENDARY, Rarity.LEGENDARY);
+        }
+        Object object = new int[][]{{-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+        for (int i = 0; i < Math.min(((Object)object).length, list.size()); ++i) {
+            Object object2 = object[i][0];
+            Object object3 = object[i][1];
+            Rarity rarity = (Rarity)((Object)list.get(i));
+            this.plugin.boxes().spawnBoxAt((int)object2, (int)object3, rarity, false, null);
         }
     }
 
-    /** 对局开始: 获取玩家出生位置 (平台边缘均匀分布, 区域线程外只算坐标) */
-    public Location spawnPointFor(int playerIndex, int playerCount) {
-        World w = plugin.worlds().world();
-        if (w == null) return null;
-        int radius = Math.max(4, plugin.getConfig().getInt("game.spawn-area-radius", 7));
-        double angle = (playerCount <= 1) ? 0
-                : (playerIndex * (Math.PI * 2) / playerCount) + ThreadLocalRandom.current().nextDouble(-0.3, 0.3);
-        int r = Math.max(2, radius - 1);
-        double x = Math.cos(angle) * r;
-        double z = Math.sin(angle) * r;
-        return new Location(w, x, centerY, z, (float) Math.toDegrees(angle) + 90, 0f);
+    public Location spawnPointFor(int n, int n2) {
+        World world = this.plugin.worlds().world();
+        if (world == null) {
+            return null;
+        }
+        int n3 = Math.max(4, this.plugin.getConfig().getInt("game.spawn-area-radius", 7));
+        double d = n2 <= 1 ? 0.0 : (double)n * (Math.PI * 2) / (double)n2 + ThreadLocalRandom.current().nextDouble(-0.3, 0.3);
+        int n4 = Math.max(2, n3 - 1);
+        double d2 = Math.cos(d) * (double)n4;
+        double d3 = Math.sin(d) * (double)n4;
+        return new Location(world, d2, (double)this.centerY, d3, (float)Math.toDegrees(d) + 90.0f, 0.0f);
     }
 }

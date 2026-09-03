@@ -1,266 +1,312 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Material
+ *  org.bukkit.NamespacedKey
+ *  org.bukkit.Registry
+ *  org.bukkit.enchantments.Enchantment
+ *  org.bukkit.inventory.Inventory
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.EnchantmentStorageMeta
+ *  org.bukkit.inventory.meta.ItemMeta
+ */
 package com.terrabox;
 
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
+import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
-
-/**
- * 战利品表: 从 config.yml loot 段加载五档物品配置, 随机填充物资箱
- * 线程说明: 只做配置读取与 ItemStack 构建(纯对象), 可在 Region 线程直接调用;
- *          load() 在启用阶段调用一次, 每档列表构建后只读。
- */
 public class LootManager {
     private final TerraBoxPlugin plugin;
-    private final Map<Rarity, List<LootItem>> tables = new HashMap<>();
-    private final Map<Rarity, MoneyReward> moneyRewards = new HashMap<>();
+    private final Map<Rarity, List<LootItem>> tables = new HashMap<Rarity, List<LootItem>>();
+    private final Map<Rarity, MoneyReward> moneyRewards = new HashMap<Rarity, MoneyReward>();
 
-    public LootManager(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public LootManager(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
     public void load() {
-        tables.clear();
-        moneyRewards.clear();
-        for (Rarity r : Rarity.values()) {
-            List<LootItem> list = new ArrayList<>();
-            // items 是 YAML 列表(数组), 用 getMapList 读取, 不能用 getConfigurationSection
-            List<?> itemList = plugin.getConfig().getMapList("loot." + r.key() + ".items");
-            int idx = 0;
-            for (Object o : itemList) {
-                idx++;
-                if (!(o instanceof Map<?, ?> raw)) continue;
+        this.tables.clear();
+        this.moneyRewards.clear();
+        for (Rarity rarity : Rarity.values()) {
+            Object object2;
+            ArrayList<LootItem> arrayList = new ArrayList<LootItem>();
+            List list = this.plugin.getConfig().getMapList("loot." + rarity.key() + ".items");
+            int n = 0;
+            for (Object object2 : list) {
+                ++n;
+                if (!(object2 instanceof Map)) continue;
+                Map map = (Map)object2;
                 try {
-                    Object mObj = raw.get("material");
-                    if (mObj == null) continue;
-                    Material mat = Material.matchMaterial(String.valueOf(mObj));
-                    if (mat == null || !mat.isItem()) {
-                        plugin.getLogger().warning("战利品配置无效: " + r.key() + "#" + idx
-                                + " material=" + mObj);
+                    Object v = map.get("material");
+                    if (v == null) continue;
+                    Material material = Material.matchMaterial((String)String.valueOf(v));
+                    if (material == null || !material.isItem()) {
+                        this.plugin.getLogger().warning("\u6218\u5229\u54c1\u914d\u7f6e\u65e0\u6548: " + rarity.key() + "#" + n + " material=" + String.valueOf(v));
                         continue;
                     }
-                    int min = intOf(raw.get("min"), 1);
-                    int max = Math.max(min, intOf(raw.get("max"), min));
-                    double chance = doubleOf(raw.get("chance"), 100.0);
-                    String name = stringOf(raw.get("name"), null);
-                    String lore = stringOf(raw.get("lore"), null);
-                    String special = stringOf(raw.get("special"), null);
-                    String artifact = stringOf(raw.get("artifact"), null);
-                    String enchantStone = stringOf(raw.get("enchant-stone"), null);
-                    String craft = stringOf(raw.get("craft"), null);
-                    LootItem li = new LootItem(mat, min, max, chance,
-                            parseEnchants(raw.get("enchants")), name, lore, special, artifact, enchantStone, craft);
-                    list.add(li);
-                } catch (Exception e) {
-                    plugin.getLogger().warning("战利品解析失败 " + r.key() + "#" + idx + ": " + e.getMessage());
+                    int n2 = LootManager.intOf(map.get("min"), 1);
+                    int n3 = Math.max(n2, LootManager.intOf(map.get("max"), n2));
+                    double d = LootManager.doubleOf(map.get("chance"), 100.0);
+                    String string = LootManager.stringOf(map.get("name"), null);
+                    String string2 = LootManager.stringOf(map.get("lore"), null);
+                    String string3 = LootManager.stringOf(map.get("special"), null);
+                    String string4 = LootManager.stringOf(map.get("artifact"), null);
+                    String string5 = LootManager.stringOf(map.get("enchant-stone"), null);
+                    String string6 = LootManager.stringOf(map.get("craft"), null);
+                    LootItem lootItem = new LootItem(material, n2, n3, d, this.parseEnchants(map.get("enchants")), string, string2, string3, string4, string5, string6);
+                    arrayList.add(lootItem);
+                }
+                catch (Exception exception) {
+                    this.plugin.getLogger().warning("\u6218\u5229\u54c1\u89e3\u6790\u5931\u8d25 " + rarity.key() + "#" + n + ": " + exception.getMessage());
                 }
             }
-            tables.put(r, List.copyOf(list));
-            // money 是对象/内联map, 单独读取
-            Object moneyObj = plugin.getConfig().get("loot." + r.key() + ".money");
-            if (moneyObj instanceof Map<?, ?> mm) {
-                moneyRewards.put(r, new MoneyReward(
-                        longOf(mm.get("min"), 0), longOf(mm.get("max"), 0),
-                        doubleOf(mm.get("chance"), 0)));
+            this.tables.put(rarity, List.copyOf(arrayList));
+            Object object3 = this.plugin.getConfig().get("loot." + rarity.key() + ".money");
+            if (!(object3 instanceof Map)) continue;
+            object2 = (Map)object3;
+            this.moneyRewards.put(rarity, new MoneyReward(LootManager.longOf(object2.get("min"), 0L), LootManager.longOf(object2.get("max"), 0L), LootManager.doubleOf(object2.get("chance"), 0.0)));
+        }
+        int n = this.tables.values().stream().mapToInt(List::size).sum();
+        this.plugin.getLogger().info("\u6218\u5229\u54c1\u8868\u52a0\u8f7d\u5b8c\u6210: 5 \u6863\u5171 " + n + " \u79cd\u6761\u76ee");
+    }
+
+    private static int intOf(Object object, int n) {
+        int n2;
+        if (object instanceof Number) {
+            Number number = (Number)object;
+            n2 = number.intValue();
+        } else {
+            n2 = n;
+        }
+        return n2;
+    }
+
+    private static long longOf(Object object, long l) {
+        long l2;
+        if (object instanceof Number) {
+            Number number = (Number)object;
+            l2 = number.longValue();
+        } else {
+            l2 = l;
+        }
+        return l2;
+    }
+
+    private static double doubleOf(Object object, double d) {
+        double d2;
+        if (object instanceof Number) {
+            Number number = (Number)object;
+            d2 = number.doubleValue();
+        } else if (object instanceof String) {
+            String string = (String)object;
+            d2 = Double.parseDouble(string);
+        } else {
+            d2 = d;
+        }
+        return d2;
+    }
+
+    private static String stringOf(Object object, String string) {
+        return object == null ? string : String.valueOf(object);
+    }
+
+    private Map<Enchantment, int[]> parseEnchants(Object object) {
+        HashMap<Enchantment, int[]> hashMap;
+        block3: {
+            String string;
+            block2: {
+                hashMap = new HashMap<Enchantment, int[]>();
+                if (!(object instanceof Map)) break block2;
+                Map map = (Map)object;
+                for (Map.Entry entry : map.entrySet()) {
+                    this.addEnchant(hashMap, String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+                }
+                break block3;
+            }
+            if (!(object instanceof String) || (string = (String)object).isBlank()) break block3;
+            for (String string2 : string.split("[;,]")) {
+                String[] stringArray = string2.trim().split(":");
+                if (stringArray.length != 2) continue;
+                this.addEnchant(hashMap, stringArray[0].trim(), stringArray[1].trim());
             }
         }
-        int total = tables.values().stream().mapToInt(List::size).sum();
-        plugin.getLogger().info("战利品表加载完成: 5 档共 " + total + " 种条目");
+        return hashMap;
     }
 
-    private static int intOf(Object o, int def) {
-        return (o instanceof Number n) ? n.intValue() : def;
-    }
-    private static long longOf(Object o, long def) {
-        return (o instanceof Number n) ? n.longValue() : def;
-    }
-    private static double doubleOf(Object o, double def) {
-        return (o instanceof Number n) ? n.doubleValue()
-                : (o instanceof String s ? Double.parseDouble(s) : def);
-    }
-    private static String stringOf(Object o, String def) {
-        return o == null ? def : String.valueOf(o);
-    }
-
-    /** 解析附魔: 支持内联map {POWER:1, SHARPNESS:2-3} 或字符串 "POWER:1;SHARPNESS:2-3" */
-    private Map<Enchantment, int[]> parseEnchants(Object raw) {
-        Map<Enchantment, int[]> map = new java.util.HashMap<>();
-        if (raw instanceof Map<?, ?> em) {
-            for (Map.Entry<?, ?> e : em.entrySet()) {
-                addEnchant(map, String.valueOf(e.getKey()), String.valueOf(e.getValue()));
-            }
-        } else if (raw instanceof String s && !s.isBlank()) {
-            for (String part : s.split("[;,]")) {
-                String[] seg = part.trim().split(":");
-                if (seg.length == 2) addEnchant(map, seg[0].trim(), seg[1].trim());
-            }
-        }
-        return map;
-    }
-
-    private void addEnchant(Map<Enchantment, int[]> map, String name, String lv) {
+    private void addEnchant(Map<Enchantment, int[]> map, String string, String string2) {
         try {
-            Enchantment ench = findEnchant(name);
-            if (ench == null) {
-                plugin.getLogger().warning("未知附魔: " + name + " (已跳过)");
+            Enchantment enchantment = this.findEnchant(string);
+            if (enchantment == null) {
+                this.plugin.getLogger().warning("\u672a\u77e5\u9644\u9b54: " + string + " (\u5df2\u8df3\u8fc7)");
                 return;
             }
-            if (lv.contains("-")) {
-                String[] ab = lv.split("-");
-                map.put(ench, new int[]{Integer.parseInt(ab[0]), Integer.parseInt(ab[1])});
+            if (string2.contains("-")) {
+                String[] stringArray = string2.split("-");
+                map.put(enchantment, new int[]{Integer.parseInt(stringArray[0]), Integer.parseInt(stringArray[1])});
             } else {
-                int n = Integer.parseInt(lv);
-                map.put(ench, new int[]{n, n});
+                int n = Integer.parseInt(string2);
+                map.put(enchantment, new int[]{n, n});
             }
-        } catch (Exception ignored) {}
+        }
+        catch (Exception exception) {
+            // empty catch block
+        }
     }
 
-    private Enchantment findEnchant(String name) {
+    private Enchantment findEnchant(String string) {
         try {
-            return Registry.ENCHANTMENT.get(NamespacedKey.minecraft(name.toLowerCase(java.util.Locale.ROOT)));
-        } catch (Throwable t) {
+            return (Enchantment)Registry.ENCHANTMENT.get(NamespacedKey.minecraft((String)string.toLowerCase(Locale.ROOT)));
+        }
+        catch (Throwable throwable) {
             return null;
         }
     }
 
-    /** 把一档战利品随机填进容器 (必须在物资箱所在区域线程调用), 返回填充的物品堆数 */
-    public int fillInventory(Inventory inv, Rarity rarity) {
-        inv.clear();
-        List<LootItem> table = tables.getOrDefault(rarity, List.of());
-        if (table.isEmpty()) return 0;
-        ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        // 平衡性: 每箱目标堆数区间 (按稀有度, 可用 loot.<key>.min-stacks/max-stacks 覆盖)
-        int minStacks = plugin.getConfig().getInt("loot." + rarity.key() + ".min-stacks", rarity.minStacks());
-        int maxStacks = plugin.getConfig().getInt("loot." + rarity.key() + ".max-stacks", rarity.maxStacks());
-        maxStacks = Math.max(maxStacks, minStacks);
-        // 打乱表格, 保证填充多样性 (不同箱子里出现物品不同)
-        List<LootItem> shuffled = new ArrayList<>(table);
-        java.util.Collections.shuffle(shuffled, rnd);
-        int placed = 0;
-        for (LootItem li : shuffled) {
-            if (placed >= maxStacks && maxStacks > 0) break; // 达到上限停止, 防爆
-            if (rnd.nextDouble(100) >= li.chance) continue;
-            int amount = li.min >= li.max ? li.min : rnd.nextInt(li.min, li.max + 1);
-            if (amount <= 0) continue;
-            // 特殊道具: 每格仅 1 个 (避免按堆叠重复生成) — 碎片/材料可堆叠, 允许一次开多个
-            if (li.special != null || li.artifact != null || li.enchantStone != null) amount = 1;
-            int perStack = Math.min(amount, li.material.getMaxStackSize());
-            int remaining = amount;
-            while (remaining > 0 && perStack > 0) {
-                int n = Math.min(perStack, remaining);
-                ItemStack stack = new ItemStack(li.material, n);
-                if (!li.enchants.isEmpty()) {
-                    if (li.material == Material.ENCHANTED_BOOK) {
-                        // 附魔书的词条必须存到 EnchantmentStorageMeta (storedEnchants), addEnchant 不生效
-                        org.bukkit.inventory.meta.EnchantmentStorageMeta sm =
-                                (org.bukkit.inventory.meta.EnchantmentStorageMeta) stack.getItemMeta();
-                        for (Map.Entry<Enchantment, int[]> e : li.enchants.entrySet()) {
-                            int lo = e.getValue()[0], hi = Math.max(e.getValue()[0], e.getValue()[1]);
-                            int lv = lo >= hi ? lo : rnd.nextInt(lo, hi + 1);
-                            if (lv > 0) {
-                                try { sm.addStoredEnchant(e.getKey(), lv, true); } catch (Exception ignored) {}
+    public int fillInventory(Inventory inventory, Rarity rarity) {
+        int n;
+        LootItem lootItem22;
+        inventory.clear();
+        List list = this.tables.getOrDefault((Object)rarity, List.of());
+        if (list.isEmpty()) {
+            return 0;
+        }
+        ThreadLocalRandom threadLocalRandom = ThreadLocalRandom.current();
+        int n2 = this.plugin.getConfig().getInt("loot." + rarity.key() + ".min-stacks", rarity.minStacks());
+        int n3 = this.plugin.getConfig().getInt("loot." + rarity.key() + ".max-stacks", rarity.maxStacks());
+        n3 = Math.max(n3, n2);
+        ArrayList arrayList = new ArrayList(list);
+        Collections.shuffle(arrayList, threadLocalRandom);
+        int n4 = 0;
+        for (LootItem lootItem22 : arrayList) {
+            int n5;
+            if (n4 >= n3 && n3 > 0) break;
+            if (threadLocalRandom.nextDouble(100.0) >= lootItem22.chance || (n = lootItem22.min >= lootItem22.max ? lootItem22.min : threadLocalRandom.nextInt(lootItem22.min, lootItem22.max + 1)) <= 0) continue;
+            if (lootItem22.special != null || lootItem22.artifact != null || lootItem22.enchantStone != null) {
+                n = 1;
+            }
+            int n6 = Math.min(n, lootItem22.material.getMaxStackSize());
+            for (int i = n; i > 0 && n6 > 0; i -= n5) {
+                Object object;
+                n5 = Math.min(n6, i);
+                Object object2 = new ItemStack(lootItem22.material, n5);
+                if (!lootItem22.enchants.isEmpty()) {
+                    if (lootItem22.material == Material.ENCHANTED_BOOK) {
+                        object = (EnchantmentStorageMeta)object2.getItemMeta();
+                        for (Map.Entry entry : lootItem22.enchants.entrySet()) {
+                            var19_23 = ((int[])entry.getValue())[0];
+                            int n7 = var19_23 >= (var20_24 = Math.max(((int[])entry.getValue())[0], ((int[])entry.getValue())[1])) ? var19_23 : threadLocalRandom.nextInt(var19_23, var20_24 + 1);
+                            if (n7 <= 0) continue;
+                            try {
+                                object.addStoredEnchant((Enchantment)entry.getKey(), n7, true);
                             }
+                            catch (Exception exception) {}
                         }
-                        stack.setItemMeta(sm);
+                        object2.setItemMeta((ItemMeta)object);
                     } else {
-                        for (Map.Entry<Enchantment, int[]> e : li.enchants.entrySet()) {
-                            int lo = e.getValue()[0], hi = Math.max(e.getValue()[0], e.getValue()[1]);
-                            int lv = lo >= hi ? lo : rnd.nextInt(lo, hi + 1);
-                            if (lv > 0) {
-                                try { stack.addUnsafeEnchantment(e.getKey(), lv); } catch (Exception ignored) {}
+                        object = lootItem22.enchants.entrySet().iterator();
+                        while (object.hasNext()) {
+                            Map.Entry entry = (Map.Entry)object.next();
+                            int n8 = ((int[])entry.getValue())[0];
+                            var20_24 = n8 >= (var19_23 = Math.max(((int[])entry.getValue())[0], ((int[])entry.getValue())[1])) ? n8 : threadLocalRandom.nextInt(n8, var19_23 + 1);
+                            if (var20_24 <= 0) continue;
+                            try {
+                                object2.addUnsafeEnchantment((Enchantment)entry.getKey(), var20_24);
                             }
+                            catch (Exception exception) {}
                         }
                     }
                 }
-                // 自定义道具名/描述 (品质道具)
-                if (li.name != null || li.lore != null) {
-                    org.bukkit.inventory.meta.ItemMeta meta = stack.getItemMeta();
-                    if (meta != null) {
-                        if (li.name != null) meta.setDisplayName(amp(li.name));
-                        if (li.lore != null) {
-                            meta.setLore(java.util.Arrays.stream(li.lore.split("\\n"))
-                                    .map(LootManager::amp).collect(java.util.stream.Collectors.toList()));
-                        }
-                        stack.setItemMeta(meta);
+                if ((lootItem22.name != null || lootItem22.lore != null) && (object = object2.getItemMeta()) != null) {
+                    if (lootItem22.name != null) {
+                        object.setDisplayName(LootManager.amp(lootItem22.name));
                     }
-                }
-                // 特殊道具: 以配置的特殊道具 key 构建 (覆盖普通材质为特殊道具)
-                if (li.special != null && plugin.specialItems() != null) {
-                    ItemStack sp = plugin.specialItems().buildItem(li.special);
-                    if (sp != null) stack = sp;
-                }
-                // 神器: 以配置的神器 key 构建 (覆盖为神器)
-                if (li.artifact != null && plugin.artifacts() != null) {
-                    ItemStack ar = plugin.artifacts().buildItem(li.artifact);
-                    if (ar != null) stack = ar;
-                }
-                // 附魔石: 构建一枚随机附魔石
-                if (li.enchantStone != null && plugin.enchants() != null) {
-                    ItemStack es = plugin.enchants().buildRandomStone();
-                    if (es != null) stack = es;
-                }
-                // 碎片/材料: 合成材料 (craft: <key> 引用), 保持 n 数量 (可堆叠)
-                if (li.craft != null && plugin.crafts() != null) {
-                    ItemStack cm = plugin.crafts().buildItem(li.craft);
-                    if (cm != null) {
-                        cm.setAmount(n);
-                        stack = cm;
+                    if (lootItem22.lore != null) {
+                        object.setLore(Arrays.stream(lootItem22.lore.split("\\n")).map(LootManager::amp).collect(Collectors.toList()));
                     }
+                    object2.setItemMeta((ItemMeta)object);
                 }
-                inv.addItem(stack);
-                placed++;
-                remaining -= n;
+                if (lootItem22.special != null && this.plugin.specialItems() != null && (object = this.plugin.specialItems().buildItem(lootItem22.special)) != null) {
+                    object2 = object;
+                }
+                if (lootItem22.artifact != null && this.plugin.artifacts() != null && (object = this.plugin.artifacts().buildItem(lootItem22.artifact)) != null) {
+                    object2 = object;
+                }
+                if (lootItem22.enchantStone != null && this.plugin.enchants() != null && (object = this.plugin.enchants().buildRandomStone()) != null) {
+                    object2 = object;
+                }
+                if (lootItem22.craft != null && this.plugin.crafts() != null && (object = this.plugin.crafts().buildItem(lootItem22.craft)) != null) {
+                    object.setAmount(n5);
+                    object2 = object;
+                }
+                inventory.addItem(new ItemStack[]{object2});
+                ++n4;
             }
         }
-        // 保底: 若未达到最小堆数, 循环采样补充 (直到 minStacks 或表格遍历完)
-        int guard = 0;
-        while (placed < minStacks && placed < 54 && guard < 40) {
-            LootItem li = shuffled.get(rnd.nextInt(shuffled.size()));
-            if (li.special != null || li.artifact != null || li.enchantStone != null || li.craft != null) { guard++; continue; } // 保底不补特殊道具
-            int amount = Math.max(1, li.min >= li.max ? li.min : rnd.nextInt(li.min, li.max + 1));
-            ItemStack stack = new ItemStack(li.material, Math.min(amount, li.material.getMaxStackSize()));
-            inv.addItem(stack);
-            placed++;
-            guard++;
+        int n9 = 0;
+        while (n4 < n2 && n4 < 54 && n9 < 40) {
+            lootItem22 = (LootItem)arrayList.get(threadLocalRandom.nextInt(arrayList.size()));
+            if (lootItem22.special != null || lootItem22.artifact != null || lootItem22.enchantStone != null || lootItem22.craft != null) {
+                ++n9;
+                continue;
+            }
+            n = Math.max(1, lootItem22.min >= lootItem22.max ? lootItem22.min : threadLocalRandom.nextInt(lootItem22.min, lootItem22.max + 1));
+            ItemStack itemStack = new ItemStack(lootItem22.material, Math.min(n, lootItem22.material.getMaxStackSize()));
+            inventory.addItem(new ItemStack[]{itemStack});
+            ++n4;
+            ++n9;
         }
-        if (placed == 0) {
-            LootItem li = table.get(0);
-            ItemStack stack = new ItemStack(li.material, Math.max(1, li.min));
-            inv.addItem(stack);
-            placed = 1;
+        if (n4 == 0) {
+            lootItem22 = (LootItem)list.get(0);
+            ItemStack itemStack = new ItemStack(lootItem22.material, Math.max(1, lootItem22.min));
+            inventory.addItem(new ItemStack[]{itemStack});
+            n4 = 1;
         }
-        return placed;
+        return n4;
     }
 
-    /** 开箱货币奖励, 无奖励返回 0 (任意线程) */
     public long rollMoney(Rarity rarity) {
-        MoneyReward mr = moneyRewards.get(rarity);
-        if (mr == null || !plugin.getConfig().getBoolean("economy.loot-money", true)) return 0;
-        if (ThreadLocalRandom.current().nextDouble(100) >= mr.chance) return 0;
-        if (mr.max <= mr.min) return Math.max(0, mr.min);
-        return ThreadLocalRandom.current().nextLong(mr.min, mr.max + 1);
+        MoneyReward moneyReward = this.moneyRewards.get((Object)rarity);
+        if (moneyReward == null || !this.plugin.getConfig().getBoolean("economy.loot-money", true)) {
+            return 0L;
+        }
+        if (ThreadLocalRandom.current().nextDouble(100.0) >= moneyReward.chance) {
+            return 0L;
+        }
+        if (moneyReward.max <= moneyReward.min) {
+            return Math.max(0L, moneyReward.min);
+        }
+        return ThreadLocalRandom.current().nextLong(moneyReward.min, moneyReward.max + 1L);
     }
 
-    public int tableSize(Rarity r) {
-        return tables.getOrDefault(r, List.of()).size();
+    public int tableSize(Rarity rarity) {
+        return this.tables.getOrDefault((Object)rarity, List.of()).size();
     }
 
-    private record MoneyReward(long min, long max, double chance) {}
+    private static String amp(String string) {
+        return string == null ? "" : string.replace('&', '\u00a7');
+    }
 
-    private record LootItem(Material material, int min, int max, double chance,
-                            Map<Enchantment, int[]> enchants, String name, String lore,
-                            String special, String artifact, String enchantStone, String craft) {}
+    private record LootItem(Material material, int min, int max, double chance, Map<Enchantment, int[]> enchants, String name, String lore, String special, String artifact, String enchantStone, String craft) {
+    }
 
-    /** & 码 → § 码 */
-    private static String amp(String s) {
-        return s == null ? "" : s.replace('&', '\u00A7');
+    private record MoneyReward(long min, long max, double chance) {
     }
 }

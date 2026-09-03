@@ -1,117 +1,91 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Material
+ *  org.bukkit.inventory.ItemStack
+ */
 package com.terrabox;
 
-import org.bukkit.Material;
-import org.bukkit.inventory.ItemStack;
-
-import java.util.ArrayList;
+import com.terrabox.Rarity;
+import com.terrabox.TerraBoxPlugin;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 
-/**
- * 道具审计日志器: 记录所有道具生成和分配事件
- * 
- * 线程安全: 所有方法可在任意线程调用 (CHM + CopyOnWriteArrayList + AtomicLong)
- * 
- * 日志策略: 不再逐条打印每个箱子的投放日志 (避免大量箱子时刷屏),
- *           改为仅在批次完成时通过 BoxManager 打印一条汇总。
- */
 public class LootAuditLogger {
     private final TerraBoxPlugin plugin;
-    // 系统级(无玩家)生成事件所用的哨兵 key —— 避免 null 作为 ConcurrentHashMap key(白皮书: CHM 禁止 null key)
     public static final UUID SYSTEM = new UUID(0L, 0L);
-    private final ConcurrentHashMap<UUID, List<LootAuditEntry>> auditLog = new ConcurrentHashMap<>();
-    private final AtomicLong totalLootGenerated = new AtomicLong(0);
-    private final AtomicLong totalLootDistributed = new AtomicLong(0);
-    
-    public LootAuditLogger(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    private final ConcurrentHashMap<UUID, List<LootAuditEntry>> auditLog = new ConcurrentHashMap();
+    private final AtomicLong totalLootGenerated = new AtomicLong(0L);
+    private final AtomicLong totalLootDistributed = new AtomicLong(0L);
+
+    public LootAuditLogger(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
-    
-    /** 规范化玩家 key: null/无玩家 → SYSTEM 哨兵, 避免 CHM null key NPE */
-    private UUID safeKey(UUID playerUUID) {
-        return playerUUID == null ? SYSTEM : playerUUID;
+
+    private UUID safeKey(UUID uUID) {
+        return uUID == null ? SYSTEM : uUID;
     }
-    
-    /**
-     * 记录物资箱道具生成事件 (聚合计数, 不逐条打印日志)
-     * @param playerUUID 玩家 UUID (无玩家用 SYSTEM)
-     * @param totalStacks 该次投放的总堆数
-     */
-    public void logBoxGeneration(UUID playerUUID, int totalStacks) {
-        UUID key = safeKey(playerUUID);
-        totalLootGenerated.addAndGet(totalStacks);
-        // 不逐条打印日志, 由 BoxManager 在批次结束时打印汇总
+
+    public void logBoxGeneration(UUID uUID, int n) {
+        UUID uUID2 = this.safeKey(uUID);
+        this.totalLootGenerated.addAndGet(n);
     }
-    
-    /**
-     * 记录玩家开箱事件
-     */
-    public void logPlayerOpening(UUID playerUUID, Rarity rarity, ItemStack item, int amount, long timestamp) {
-        UUID key = safeKey(playerUUID);
-        LootAuditEntry entry = new LootAuditEntry(
-            key, rarity, item.getType(), amount, timestamp,
-            "player_opening", "玩家开箱"
-        );
-        auditLog.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(entry);
-        totalLootDistributed.addAndGet(amount);
+
+    public void logPlayerOpening(UUID uUID2, Rarity rarity, ItemStack itemStack, int n, long l) {
+        UUID uUID3 = this.safeKey(uUID2);
+        LootAuditEntry lootAuditEntry = new LootAuditEntry(uUID3, rarity, itemStack.getType(), n, l, "player_opening", "\u73a9\u5bb6\u5f00\u7bb1");
+        this.auditLog.computeIfAbsent(uUID3, uUID -> new CopyOnWriteArrayList()).add(lootAuditEntry);
+        this.totalLootDistributed.addAndGet(n);
     }
-    
-    /**
-     * 记录道具异常生成事件
-     */
-    public void logAnomaly(UUID playerUUID, Rarity rarity, ItemStack item, int amount, String reason, long timestamp) {
-        UUID key = safeKey(playerUUID);
-        LootAuditEntry entry = new LootAuditEntry(
-            key, rarity, item.getType(), amount, timestamp,
-            "anomaly", "异常生成: " + reason
-        );
-        auditLog.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(entry);
-        plugin.getLogger().warning("[审计] 异常生成: 稀有度=" + rarity.display
-                + ", 物品=" + item.getType() + ", 数量=" + amount + ", 原因=" + reason);
+
+    public void logAnomaly(UUID uUID2, Rarity rarity, ItemStack itemStack, int n, String string, long l) {
+        UUID uUID3 = this.safeKey(uUID2);
+        LootAuditEntry lootAuditEntry = new LootAuditEntry(uUID3, rarity, itemStack.getType(), n, l, "anomaly", "\u5f02\u5e38\u751f\u6210: " + string);
+        this.auditLog.computeIfAbsent(uUID3, uUID -> new CopyOnWriteArrayList()).add(lootAuditEntry);
+        this.plugin.getLogger().warning("[\u5ba1\u8ba1] \u5f02\u5e38\u751f\u6210: \u7a00\u6709\u5ea6=" + rarity.display + ", \u7269\u54c1=" + String.valueOf(itemStack.getType()) + ", \u6570\u91cf=" + n + ", \u539f\u56e0=" + string);
     }
-    
-    /**
-     * 获取玩家审计日志
-     */
-    public List<LootAuditEntry> getPlayerAuditLog(UUID playerUUID) {
-        return auditLog.getOrDefault(safeKey(playerUUID), new java.util.concurrent.CopyOnWriteArrayList<>());
+
+    public List<LootAuditEntry> getPlayerAuditLog(UUID uUID) {
+        return this.auditLog.getOrDefault(this.safeKey(uUID), new CopyOnWriteArrayList());
     }
-    
-    /** 获取总生成道具数量 */
-    public long getTotalLootGenerated() { return totalLootGenerated.get(); }
-    
-    /** 获取总分配道具数量 */
-    public long getTotalLootDistributed() { return totalLootDistributed.get(); }
-    
-    /**
-     * 生成审计报告
-     */
+
+    public long getTotalLootGenerated() {
+        return this.totalLootGenerated.get();
+    }
+
+    public long getTotalLootDistributed() {
+        return this.totalLootDistributed.get();
+    }
+
     public String generateAuditReport() {
-        StringBuilder report = new StringBuilder();
-        report.append("=== 道具审计报告 ===\n");
-        report.append("总生成道具数量: ").append(totalLootGenerated.get()).append("\n");
-        report.append("总分配道具数量: ").append(totalLootDistributed.get()).append("\n");
-        long gen = totalLootGenerated.get();
-        if (gen > 0) {
-            report.append("生成/分配比例: ").append(String.format("%.2f", (double) totalLootDistributed.get() / gen)).append("\n\n");
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append("=== \u9053\u5177\u5ba1\u8ba1\u62a5\u544a ===\n");
+        stringBuilder.append("\u603b\u751f\u6210\u9053\u5177\u6570\u91cf: ").append(this.totalLootGenerated.get()).append("\n");
+        stringBuilder.append("\u603b\u5206\u914d\u9053\u5177\u6570\u91cf: ").append(this.totalLootDistributed.get()).append("\n");
+        long l = this.totalLootGenerated.get();
+        if (l > 0L) {
+            stringBuilder.append("\u751f\u6210/\u5206\u914d\u6bd4\u4f8b: ").append(String.format("%.2f", (double)this.totalLootDistributed.get() / (double)l)).append("\n\n");
         }
-        report.append("玩家审计统计:\n");
-        for (UUID playerUUID : auditLog.keySet()) {
-            List<LootAuditEntry> entries = auditLog.get(playerUUID);
-            long playerGenerated = entries.stream().filter(e -> e.eventType.equals("box_generation")).mapToLong(e -> e.amount).sum();
-            long playerDistributed = entries.stream().filter(e -> e.eventType.equals("player_opening")).mapToLong(e -> e.amount).sum();
-            report.append("玩家 ").append(playerUUID).append(": \n");
-            report.append("  生成道具: ").append(playerGenerated).append("\n");
-            report.append("  分配道具: ").append(playerDistributed).append("\n");
-            if (playerGenerated > 0)
-                report.append("  比例: ").append(String.format("%.2f", (double) playerDistributed / playerGenerated)).append("\n");
+        stringBuilder.append("\u73a9\u5bb6\u5ba1\u8ba1\u7edf\u8ba1:\n");
+        for (UUID uUID : this.auditLog.keySet()) {
+            List<LootAuditEntry> list = this.auditLog.get(uUID);
+            long l2 = list.stream().filter(lootAuditEntry -> lootAuditEntry.eventType.equals("box_generation")).mapToLong(lootAuditEntry -> lootAuditEntry.amount).sum();
+            long l3 = list.stream().filter(lootAuditEntry -> lootAuditEntry.eventType.equals("player_opening")).mapToLong(lootAuditEntry -> lootAuditEntry.amount).sum();
+            stringBuilder.append("\u73a9\u5bb6 ").append(uUID).append(": \n");
+            stringBuilder.append("  \u751f\u6210\u9053\u5177: ").append(l2).append("\n");
+            stringBuilder.append("  \u5206\u914d\u9053\u5177: ").append(l3).append("\n");
+            if (l2 <= 0L) continue;
+            stringBuilder.append("  \u6bd4\u4f8b: ").append(String.format("%.2f", (double)l3 / (double)l2)).append("\n");
         }
-        return report.toString();
+        return stringBuilder.toString();
     }
-    
-    /** 道具审计条目 */
+
     private static class LootAuditEntry {
         final UUID playerUUID;
         final Rarity rarity;
@@ -120,15 +94,15 @@ public class LootAuditLogger {
         final long timestamp;
         final String eventType;
         final String description;
-        
-        LootAuditEntry(UUID playerUUID, Rarity rarity, Material material, int amount, long timestamp, String eventType, String description) {
-            this.playerUUID = playerUUID;
+
+        LootAuditEntry(UUID uUID, Rarity rarity, Material material, int n, long l, String string, String string2) {
+            this.playerUUID = uUID;
             this.rarity = rarity;
             this.material = material;
-            this.amount = amount;
-            this.timestamp = timestamp;
-            this.eventType = eventType;
-            this.description = description;
+            this.amount = n;
+            this.timestamp = l;
+            this.eventType = string;
+            this.description = string2;
         }
     }
 }

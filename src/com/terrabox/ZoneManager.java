@@ -1,480 +1,473 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  io.papermc.paper.threadedregions.scheduler.ScheduledTask
+ *  net.kyori.adventure.text.Component
+ *  net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Color
+ *  org.bukkit.Location
+ *  org.bukkit.Particle
+ *  org.bukkit.Particle$DustOptions
+ *  org.bukkit.World
+ *  org.bukkit.entity.Player
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.GameManager;
+import com.terrabox.TerraBoxPlugin;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import org.bukkit.plugin.Plugin;
 
-import java.util.UUID;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.ThreadLocalRandom;
-
-/**
- * 毒圈 (Storm / 缩圈) 系统 —— 吃鸡式安全区
- *
- * 玩法: 对局开始后整张地图都是安全区; 每隔一段时间安全区收缩,
- *       圈外 (毒圈内) 的玩家持续受到递增伤害, 迫使玩家向圈内靠拢, 加速决战。
- *
- * 状态模型:
- *  - phase            当前阶段 (0 = 初始满图, 每收缩一次 +1)
- *  - cur 中心/半径      当前 (或正在收缩的) 安全区
- *  - target 中心/半径   本阶段的目标安全区
- *  - waitUntil       当前圈停留结束时间 (开始收缩时刻)
- *  - shrinkUntil     收缩完成时刻 (从 waitUntil 起 shrink-duration 后)
- *  - 收缩过程中圈外判定: 以 cur 半径插值到 target 的实时半径为准 (等比向圆心收缩)
- *
- * 线程模型 (白皮书 §4/§5):
- *  - 圈状态字段全部 volatile + 快照读取, 任意线程安全
- *  - GlobalRegionScheduler 定时 tick (缩圈阶段推进 / 圈外伤害判定)
- *  - 圈外伤害在玩家区域线程施加 (Player#damage 线程安全, Folia 允许直接调用)
- *  - BossBar/actionbar 提示经纯发包 API 线程安全
- */
 public class ZoneManager {
     private final TerraBoxPlugin plugin;
     private final GameManager game;
-
-    // 圈状态 (volatile, 任意线程可快照读)
-    private volatile double curX, curZ, curR;       // 当前安全区 (收缩中为插值实时圆)
-    private volatile double tgtX, tgtZ, tgtR;       // 目标安全区
-    private volatile int phase;                      // 当前阶段
-    private volatile long waitUntil;                 // 当前圈停留结束时间 (开始收缩)
-    private volatile long shrinkUntil;               // 收缩完成时刻
-    private volatile boolean shrinking;              // 是否正在收缩
-    private volatile boolean active;                 // 毒圈是否激活 (对局运行中)
-
+    private volatile double curX;
+    private volatile double curZ;
+    private volatile double curR;
+    private volatile double tgtX;
+    private volatile double tgtZ;
+    private volatile double tgtR;
+    private volatile int phase;
+    private volatile long waitUntil;
+    private volatile long shrinkUntil;
+    private volatile boolean shrinking;
+    private volatile boolean active;
     private ScheduledTask tickTask;
     private ScheduledTask particleTask;
     private final AtomicBoolean running = new AtomicBoolean(false);
-    // 缓存每个存活玩家的毒圈距离文本 (由玩家区域线程更新, 供 ScoreboardManager 合并到 ActionBar, 避免多系统抢 ActionBar)
-    private final Map<UUID, String> distCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, String> distCache = new ConcurrentHashMap<UUID, String>();
+    private volatile double prevX;
+    private volatile double prevZ;
+    private volatile double prevR;
 
-    /** 读取指定玩家的毒圈距离文本 (任意线程; 无则空) */
-    public String distanceText(UUID u) { return distCache.getOrDefault(u, ""); }
-
-    public ZoneManager(TerraBoxPlugin plugin, GameManager game) {
-        this.plugin = plugin;
-        this.game = game;
+    public String distanceText(UUID uUID) {
+        return this.distCache.getOrDefault(uUID, "");
     }
 
-    // ==================== 配置读取 (任意线程) ====================
+    public ZoneManager(TerraBoxPlugin terraBoxPlugin, GameManager gameManager) {
+        this.plugin = terraBoxPlugin;
+        this.game = gameManager;
+    }
 
-    private boolean enabled() { return plugin.getConfig().getBoolean("storm.enabled", true); }
-    private int phases() { return Math.max(1, plugin.getConfig().getInt("storm.phases", 5)); }
+    private boolean enabled() {
+        return this.plugin.getConfig().getBoolean("storm.enabled", true);
+    }
+
+    private int phases() {
+        return Math.max(1, this.plugin.getConfig().getInt("storm.phases", 5));
+    }
+
     private double shrinkFactor() {
-        return Math.max(0.05, Math.min(1.0, plugin.getConfig().getDouble("storm.shrink-factor", 0.6)));
-    }
-    private long waitSeconds() {
-        return Math.max(5, plugin.getConfig().getLong("storm.wait-seconds", 60));
-    }
-    private long shrinkSeconds() {
-        return Math.max(5, plugin.getConfig().getLong("storm.shrink-duration-seconds", 40));
-    }
-    private double baseDamage() {
-        return Math.max(0.0, plugin.getConfig().getDouble("storm.damage-per-second", 1.0));
-    }
-    private double damageStepPerPhase() {
-        return plugin.getConfig().getDouble("storm.damage-increase-per-phase", 1.0);
+        return Math.max(0.05, Math.min(1.0, this.plugin.getConfig().getDouble("storm.shrink-factor", 0.6)));
     }
 
-    // ==================== 粒子配置 (任意线程) ====================
+    private long waitSeconds() {
+        return Math.max(5L, this.plugin.getConfig().getLong("storm.wait-seconds", 60L));
+    }
+
+    private long shrinkSeconds() {
+        return Math.max(5L, this.plugin.getConfig().getLong("storm.shrink-duration-seconds", 40L));
+    }
+
+    private double baseDamage() {
+        return Math.max(0.0, this.plugin.getConfig().getDouble("storm.damage-per-second", 1.0));
+    }
+
+    private double damageStepPerPhase() {
+        return this.plugin.getConfig().getDouble("storm.damage-increase-per-phase", 1.0);
+    }
 
     private boolean particlesEnabled() {
-        return plugin.getConfig().getBoolean("storm.particles-enabled", true);
+        return this.plugin.getConfig().getBoolean("storm.particles-enabled", true);
     }
+
     private int particleIntervalTicks() {
-        return Math.max(1, plugin.getConfig().getInt("storm.particles-interval-ticks", 4));
+        return Math.max(1, this.plugin.getConfig().getInt("storm.particles-interval-ticks", 4));
     }
+
     private int boundaryDensity() {
-        return Math.max(1, plugin.getConfig().getInt("storm.particles-boundary-density", 3));
+        return Math.max(1, this.plugin.getConfig().getInt("storm.particles-boundary-density", 3));
     }
+
     private double boundaryViewRange() {
-        return Math.max(10, plugin.getConfig().getDouble("storm.particles-view-range", 48));
+        return Math.max(10.0, this.plugin.getConfig().getDouble("storm.particles-view-range", 48.0));
     }
+
     private boolean boundaryParticlesEnabled() {
-        return plugin.getConfig().getBoolean("storm.particles-boundary-enabled", true);
+        return this.plugin.getConfig().getBoolean("storm.particles-boundary-enabled", true);
     }
+
     private boolean fogParticlesEnabled() {
-        return plugin.getConfig().getBoolean("storm.particles-fog-enabled", true);
+        return this.plugin.getConfig().getBoolean("storm.particles-fog-enabled", true);
     }
+
     private double fogDensity() {
-        return Math.max(1, plugin.getConfig().getDouble("storm.particles-fog-density", 1.0));
+        return Math.max(1.0, this.plugin.getConfig().getDouble("storm.particles-fog-density", 1.0));
     }
 
-    // ==================== 生命周期 ====================
-
-    /** 对局开始 (RUNNING) 时启动毒圈 */
     public void start() {
-        if (!enabled()) return;
-        World w = game.roomWorld();
-        if (w == null) return;
-        stop(); // 防重复 (上一局未清理干净)
-        running.set(true);
-
-        // 初始安全区 = 整张地图 (半径取地图边界的一半, 略缩一丁点保证圈在场内)
-        double worldR = borderRadius(w);
-        double initFactor = Math.max(0.2, Math.min(1.0,
-                plugin.getConfig().getDouble("storm.initial-radius-factor", 0.95)));
-        curX = 0; curZ = 0; curR = worldR * initFactor;
-        tgtX = curX; tgtZ = curZ; tgtR = curR;
-        phase = 0;
-        shrinking = false;
-        active = true;
-
-        long wait = waitSeconds() * 1000L;
-        waitUntil = System.currentTimeMillis() + wait;
-        shrinkUntil = waitUntil;
-
-        plugin.getLogger().info("[" + game.roomId() + "] 毒圈已启动: 初始半径 " + (int) curR
-                + ", 每阶段收缩 x" + shrinkFactor() + ", 共 " + phases() + " 阶段");
-        broadcast(plugin.raw("storm-start").replace("{phase}", "1")
-                .replace("{seconds}", String.valueOf(waitSeconds())));
-
-        tickTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, t -> tick(), 20L, 20L);
-
-        // 毒圈粒子特效任务: 更高频率独立运行 (每 particle-interval-ticks tick 刷新一次边界/毒雾)
-        if (particlesEnabled()) {
-            long interval = Math.max(1, particleIntervalTicks());
-            particleTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
-                    t -> spawnParticles(w), interval, interval);
+        if (!this.enabled()) {
+            return;
+        }
+        World world = this.game.roomWorld();
+        if (world == null) {
+            return;
+        }
+        this.stop();
+        this.running.set(true);
+        double d = this.borderRadius(world);
+        double d2 = Math.max(0.2, Math.min(1.0, this.plugin.getConfig().getDouble("storm.initial-radius-factor", 0.95)));
+        this.curX = 0.0;
+        this.curZ = 0.0;
+        this.curR = d * d2;
+        this.tgtX = this.curX;
+        this.tgtZ = this.curZ;
+        this.tgtR = this.curR;
+        this.phase = 0;
+        this.shrinking = false;
+        this.active = true;
+        long l = this.waitSeconds() * 1000L;
+        this.shrinkUntil = this.waitUntil = System.currentTimeMillis() + l;
+        this.plugin.getLogger().info("[" + this.game.roomId() + "] \u6bd2\u5708\u5df2\u542f\u52a8: \u521d\u59cb\u534a\u5f84 " + (int)this.curR + ", \u6bcf\u9636\u6bb5\u6536\u7f29 x" + this.shrinkFactor() + ", \u5171 " + this.phases() + " \u9636\u6bb5");
+        this.broadcast(this.plugin.raw("storm-start").replace("{phase}", "1").replace("{seconds}", String.valueOf(this.waitSeconds())));
+        this.tickTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.tick(), 20L, 20L);
+        if (this.particlesEnabled()) {
+            long l2 = Math.max(1, this.particleIntervalTicks());
+            this.particleTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate((Plugin)this.plugin, scheduledTask -> this.spawnParticles(world), l2, l2);
         }
     }
 
-    /** 对局结束/重置时停止毒圈 */
     public void stop() {
-        active = false;
-        if (tickTask != null) { tickTask.cancel(); tickTask = null; }
-        if (particleTask != null) { particleTask.cancel(); particleTask = null; }
-        running.set(false);
-        distCache.clear();
+        this.active = false;
+        if (this.tickTask != null) {
+            this.tickTask.cancel();
+            this.tickTask = null;
+        }
+        if (this.particleTask != null) {
+            this.particleTask.cancel();
+            this.particleTask = null;
+        }
+        this.running.set(false);
+        this.distCache.clear();
     }
 
-    public boolean isActive() { return active; }
-    public int phase() { return phase; }
-    public boolean shrinking() { return shrinking; }
+    public boolean isActive() {
+        return this.active;
+    }
 
-    // ==================== 主循环 (Global 线程) ====================
+    public int phase() {
+        return this.phase;
+    }
+
+    public boolean shrinking() {
+        return this.shrinking;
+    }
 
     private void tick() {
-        if (!active || !running.get()) return;
-        World w = game.roomWorld();
-        if (w == null) return;
-        long now = System.currentTimeMillis();
-
-        if (!shrinking) {
-            // 停留期: 到点开始收缩
-            if (now >= waitUntil) {
-                if (phase >= phases()) {
-                    // 已到最后阶段, 保持圈最小不再收缩 (终局圈), 持续高压
-                    applyDamage(w, now);
+        if (!this.active || !this.running.get()) {
+            return;
+        }
+        World world = this.game.roomWorld();
+        if (world == null) {
+            return;
+        }
+        long l = System.currentTimeMillis();
+        if (!this.shrinking) {
+            if (l >= this.waitUntil) {
+                if (this.phase >= this.phases()) {
+                    this.applyDamage(world, l);
                     return;
                 }
-                beginShrink(w, now);
+                this.beginShrink(world, l);
             }
         } else {
-            // 收缩期: 更新实时圆, 到点完成收缩 → 下一阶段开始等待
-            double t = shrinkProgress(now);
-            curR = lerp(prevR, tgtR, t); // prevR 见 beginShrink 设置
-            curX = lerp(prevX, tgtX, t);
-            curZ = lerp(prevZ, tgtZ, t);
-            if (now >= shrinkUntil) {
-                shrinking = false;
-                phase++;
-                long wait = waitSeconds() * 1000L;
-                waitUntil = now + wait;
-                shrinkUntil = waitUntil;
-                broadcast(plugin.raw("storm-shrink-done").replace("{phase}", String.valueOf(phase)));
+            double d = this.shrinkProgress(l);
+            this.curR = ZoneManager.lerp(this.prevR, this.tgtR, d);
+            this.curX = ZoneManager.lerp(this.prevX, this.tgtX, d);
+            this.curZ = ZoneManager.lerp(this.prevZ, this.tgtZ, d);
+            if (l >= this.shrinkUntil) {
+                this.shrinking = false;
+                ++this.phase;
+                long l2 = this.waitSeconds() * 1000L;
+                this.shrinkUntil = this.waitUntil = l + l2;
+                this.broadcast(this.plugin.raw("storm-shrink-done").replace("{phase}", String.valueOf(this.phase)));
             }
         }
-        applyDamage(w, now);
-        showDistance(w, now); // 更新距离文本缓存 (供计分板合并显示, 自身不发ActionBar)
+        this.applyDamage(world, l);
+        this.showDistance(world, l);
     }
 
-    // 上一圈状态 (收缩起点), 用于插值
-    private volatile double prevX, prevZ, prevR;
-
-    private void beginShrink(World w, long now) {
-        // 目标圈: 圆心在旧圈内随机偏移 (不超过旧圈半径 - 新圈半径, 保证新圈含于旧圈)
-        double newR = Math.max(6.0, curR * shrinkFactor());
-        double maxOff = Math.max(0, curR - newR);
-        double ang = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
-        double off = ThreadLocalRandom.current().nextDouble(maxOff);
-        double nx = curX + Math.cos(ang) * off;
-        double nz = curZ + Math.sin(ang) * off;
-
-        prevX = curX; prevZ = curZ; prevR = curR;
-        tgtX = nx; tgtZ = nz; tgtR = newR;
-        shrinking = true;
-        waitUntil = now;
-        shrinkUntil = now + shrinkSeconds() * 1000L;
-
-        broadcast(plugin.raw("storm-shrink").replace("{phase}", String.valueOf(phase + 1))
-                .replace("{seconds}", String.valueOf(shrinkSeconds())));
+    private void beginShrink(World world, long l) {
+        double d = Math.max(6.0, this.curR * this.shrinkFactor());
+        double d2 = Math.max(0.0, this.curR - d);
+        double d3 = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
+        double d4 = ThreadLocalRandom.current().nextDouble(d2);
+        double d5 = this.curX + Math.cos(d3) * d4;
+        double d6 = this.curZ + Math.sin(d3) * d4;
+        this.prevX = this.curX;
+        this.prevZ = this.curZ;
+        this.prevR = this.curR;
+        this.tgtX = d5;
+        this.tgtZ = d6;
+        this.tgtR = d;
+        this.shrinking = true;
+        this.waitUntil = l;
+        this.shrinkUntil = l + this.shrinkSeconds() * 1000L;
+        this.broadcast(this.plugin.raw("storm-shrink").replace("{phase}", String.valueOf(this.phase + 1)).replace("{seconds}", String.valueOf(this.shrinkSeconds())));
     }
 
-    private double shrinkProgress(long now) {
-        long dur = Math.max(1, shrinkUntil - waitUntil);
-        long el = now - waitUntil;
-        return Math.max(0.0, Math.min(1.0, (double) el / dur));
+    private double shrinkProgress(long l) {
+        long l2 = Math.max(1L, this.shrinkUntil - this.waitUntil);
+        long l3 = l - this.waitUntil;
+        return Math.max(0.0, Math.min(1.0, (double)l3 / (double)l2));
     }
 
-    // ==================== 圈外伤害 (Global 线程判定, 玩家区域线程施伤) ====================
+    private void applyDamage(World world, long l) {
+        if (!this.active) {
+            return;
+        }
+        double d = this.damagePerSecond();
+        for (UUID uUID : this.game.inGamePlayers()) {
+            Location location;
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            if (player == null || !player.isOnline() || this.game.isEliminated(uUID) || !player.getWorld().equals((Object)world) || this.insideSafeZone((location = player.getLocation()).getX(), location.getZ())) continue;
+            player.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    player.damage(d);
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }, () -> {});
+        }
+    }
 
-    private void applyDamage(World w, long now) {
-        if (!active) return;
-        double dmg = damagePerSecond();
-        // 对局内存活玩家逐一判定
-        for (UUID u : game.inGamePlayers()) {
-            Player p = Bukkit.getPlayer(u);
-            if (p == null || !p.isOnline()) continue;
-            if (game.isEliminated(u)) continue; // 淘汰玩家不再吃毒
-            if (!p.getWorld().equals(w)) continue;
-            Location loc = p.getLocation();
-            if (insideSafeZone(loc.getX(), loc.getZ())) {
-                // 在圈内: 提示不再掉血
+    private void showDistance(World world, long l) {
+        if (!this.active) {
+            return;
+        }
+        for (UUID uUID : this.game.inGamePlayers()) {
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            if (player == null || !player.isOnline() || this.game.isEliminated(uUID) || !player.getWorld().equals((Object)world)) continue;
+            Player player2 = player;
+            player2.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    Location location = player2.getLocation();
+                    double d = location.getX();
+                    double d2 = location.getZ();
+                    double d3 = d - this.curX;
+                    double d4 = d2 - this.curZ;
+                    double d5 = Math.sqrt(d3 * d3 + d4 * d4);
+                    boolean bl = d5 <= this.curR;
+                    double d6 = Math.abs(d5 - this.curR);
+                    String string = this.compass(d3, d4);
+                    StringBuilder stringBuilder = new StringBuilder();
+                    stringBuilder.append("\u2502 \u00a78[\u00a7b\u6bd2\u5708\u00a78] \u00a77\u7b2c\u00a7e").append(this.phase + 1).append("\u00a77/").append(this.phases()).append("\u00a77 \u00a77\u5706\u5fc3(\u00a7a").append((int)this.curX).append("\u00a77,\u00a7a").append((int)this.curZ).append("\u00a77) ").append("\u00a77\u534a\u5f84\u00a7a").append((int)this.curR);
+                    if (bl) {
+                        stringBuilder.append(" \u00a77\u4f60\u5728\u00a7a\u5708\u5185\u00a77 \u8ddd\u8fb9\u754c\u00a7a").append((int)d6).append("\u00a77\u683c");
+                    } else {
+                        stringBuilder.append(" \u00a7c\u5708\u5916! \u00a77\u671d\u00a7e").append(string).append("\u00a77\u8d70\u00a7c").append((int)d6).append("\u00a77\u683c\u5165\u5708");
+                    }
+                    if (this.shrinking) {
+                        long l2 = Math.max(0L, (this.shrinkUntil - l) / 1000L);
+                        stringBuilder.append(" \u00a77| \u00a76\u6536\u7f29\u4e2d\u00a7e").append(l2).append("\u00a77s");
+                    } else if (this.phase < this.phases()) {
+                        long l3 = this.remainingSeconds();
+                        stringBuilder.append(" \u00a77| \u00a7e").append(l3).append("\u00a77s\u540e\u6536\u7f29");
+                    }
+                    this.distCache.put(player2.getUniqueId(), stringBuilder.toString());
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }, () -> {});
+        }
+    }
+
+    private String compass(double d, double d2) {
+        double d3 = -d;
+        double d4 = -d2;
+        String[] stringArray = new String[]{"\u5317", "\u4e1c\u5317", "\u4e1c", "\u4e1c\u5357", "\u5357", "\u897f\u5357", "\u897f", "\u897f\u5317"};
+        double d5 = Math.toDegrees(Math.atan2(d3, -d4));
+        d5 = (d5 + 360.0) % 360.0;
+        int n = (int)Math.floor((d5 + 22.5) / 45.0) % 8;
+        return stringArray[n] + "\u00a77(\u00a7e" + (int)d5 + "\u00b0\u00a77)";
+    }
+
+    private void spawnParticles(World world) {
+        if (!this.particlesEnabled() || !this.active) {
+            return;
+        }
+        for (UUID uUID : this.game.inGamePlayers()) {
+            Player player = Bukkit.getPlayer((UUID)uUID);
+            if (player == null || !player.isOnline() || this.game.isEliminated(uUID) || !player.getWorld().equals((Object)world)) continue;
+            Player player2 = player;
+            player2.getScheduler().run((Plugin)this.plugin, scheduledTask -> {
+                try {
+                    boolean bl;
+                    Location location = player2.getLocation();
+                    double d = location.getX();
+                    double d2 = location.getZ();
+                    double d3 = location.getY();
+                    boolean bl2 = bl = !this.insideSafeZone(d, d2);
+                    if (this.boundaryParticlesEnabled()) {
+                        this.spawnBoundary(player2, d, d2, d3);
+                    }
+                    if (bl && this.fogParticlesEnabled()) {
+                        this.spawnFog(player2, d, d2, d3);
+                    }
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }, () -> {});
+        }
+    }
+
+    private void spawnBoundary(Player player, double d, double d2, double d3) {
+        double d4 = this.curR;
+        if (d4 <= 2.0) {
+            return;
+        }
+        double d5 = this.boundaryViewRange();
+        double d6 = d5 * d5;
+        int n = this.boundaryDensity();
+        double d7 = Math.max(0.02, 7.0 / Math.max(1.0, d4));
+        double d8 = d - this.curX;
+        double d9 = d2 - this.curZ;
+        double d10 = Math.atan2(d9, d8);
+        double d11 = Math.min(Math.PI, d5 / Math.max(1.0, d4) * 2.2 + 0.15);
+        double d12 = d10 - d11;
+        double d13 = d10 + d11;
+        double d14 = d3 + 2.0;
+        double d15 = this.shrinking ? Math.min(3.0, (d4 - this.tgtR) * 0.06) : 0.0;
+        boolean bl = d15 > 0.01;
+        for (double d16 = d12; d16 < d13; d16 += d7) {
+            double d17;
+            double d18;
+            double d19 = this.curX + Math.cos(d16) * d4;
+            double d20 = d19 - d;
+            if (d20 * d20 + (d18 = (d17 = this.curZ + Math.sin(d16) * d4) - d2) * d18 > d6) continue;
+            double d21 = d4 - d15;
+            double d22 = this.curX + Math.cos(d16) * d21;
+            double d23 = this.curZ + Math.sin(d16) * d21;
+            double d24 = d14 + Math.sin(d16 * 3.0 + (double)System.currentTimeMillis() * 0.002) * 0.5;
+            for (int i = 0; i < n; ++i) {
+                double d25 = ((double)i - (double)(n - 1) / 2.0) * 0.5;
+                try {
+                    player.spawnParticle(Particle.DUST, d22, d24 + d25, d23, 1, 0.12, 0.12, 0.12, 0.0, (Object)new Particle.DustOptions(Color.LIME, 2.2f));
+                    continue;
+                }
+                catch (Throwable throwable) {
+                    // empty catch block
+                }
+            }
+        }
+    }
+
+    private void spawnFog(Player player, double d, double d2, double d3) {
+        double d4 = this.fogDensity() * (1.0 + (double)this.phase * 0.5);
+        int n = (int)Math.min(8.0, Math.max(2.0, d4));
+        for (int i = 0; i < n; ++i) {
+            double d5 = d + ThreadLocalRandom.current().nextDouble(-1.6, 1.6);
+            double d6 = d2 + ThreadLocalRandom.current().nextDouble(-1.6, 1.6);
+            double d7 = d3 + ThreadLocalRandom.current().nextDouble(0.2, 2.6);
+            try {
+                player.spawnParticle(Particle.NOXIOUS_GAS, d5, d7, d6, 1, 0.3, 0.3, 0.3, 0.02);
+                if (this.phase < 2) continue;
+                player.spawnParticle(Particle.SMOKE, d5, d7, d6, 1, 0.2, 0.2, 0.2, 0.01);
                 continue;
             }
-            // 圈外: 施加伤害 (玩家区域线程); 方位/距离提示统一由 showDistance 显示
-            p.getScheduler().run(plugin, task -> {
-                try {
-                    p.damage(dmg);
-                } catch (Throwable ignored) {}
-            }, () -> {});
-        }
-    }
-
-    /**
-     * 每个存活玩家实时显示安全区方位指引 (ActionBar):
-     *  - 圈内: 圆心/半径 + 距边界距离 + 距下一次收缩倒计时
-     *  - 圈外: 圆心方向 (罗盘方位) + 需移动距离 + 目标方位角
-     * 保证玩家随时知道"安全区在哪、多远、往哪走" (Global 线程判定, 玩家区域线程发包)
-     */
-    /** 每个存活玩家实时计算毒圈方位/距离文本, 存入 distCache (供 ScoreboardManager 合并到 ActionBar) */
-    private void showDistance(World w, long now) {
-        if (!active) return;
-        for (UUID u : game.inGamePlayers()) {
-            Player p = Bukkit.getPlayer(u);
-            if (p == null || !p.isOnline()) continue;
-            if (game.isEliminated(u)) continue;
-            if (!p.getWorld().equals(w)) continue;
-            final Player fp = p;
-            fp.getScheduler().run(plugin, task -> {
-                try {
-                    Location loc = fp.getLocation();
-                    double px = loc.getX(), pz = loc.getZ();
-                    double dx = px - curX, dz = pz - curZ;
-                    double distCenter = Math.sqrt(dx * dx + dz * dz);
-                    boolean inside = distCenter <= curR;
-
-                    // 距安全区边界距离: 圈内 = R - distCenter(还剩多少余量), 圈外 = distCenter - R(需走多远)
-                    double edgeDist = Math.abs(distCenter - curR);
-                    // 方向: 圈外需朝圆心移动; 圈内给圆心方位 (配合罗盘)
-                    String dir = compass(dx, dz);
-
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("│ §8[§b毒圈§8] §7第§e").append(phase + 1).append("§7/").append(phases())
-                            .append("§7 §7圆心(§a").append((int) curX).append("§7,§a").append((int) curZ).append("§7) ")
-                            .append("§7半径§a").append((int) curR);
-                    if (inside) {
-                        sb.append(" §7你在§a圈内§7 距边界§a").append((int) edgeDist).append("§7格");
-                    } else {
-                        sb.append(" §c圈外! §7朝§e").append(dir)
-                                .append("§7走§c").append((int) edgeDist).append("§7格入圈");
-                    }
-                    if (shrinking) {
-                        long remain = Math.max(0, (shrinkUntil - now) / 1000);
-                        sb.append(" §7| §6收缩中§e").append(remain).append("§7s");
-                    } else if (phase < phases()) {
-                        long remain = remainingSeconds();
-                        sb.append(" §7| §e").append(remain).append("§7s后收缩");
-                    }
-                    distCache.put(fp.getUniqueId(), sb.toString());
-                } catch (Throwable ignored) {}
-            }, () -> {});
-        }
-    }
-
-    /** 玩家相对于安全区圆心的罗盘方位 (北=自圆心看玩家? 返回玩家应走向的方向). 基于向量 (dx,dz)=玩家-圆心, 给出玩家相对圆心的方位 */
-    private String compass(double dx, double dz) {
-        // 需朝圆心走 → 方向 = -(dx,dz)。此处返回玩家到圆心的方位角对应名称
-        double tx = -dx, tz = -dz; // 朝圆心向量
-        String[] names = {"北", "东北", "东", "东南", "南", "西南", "西", "西北"};
-        double deg = Math.toDegrees(Math.atan2(tx, -tz));
-        deg = (deg + 360) % 360;
-        int idx = (int) Math.floor((deg + 22.5) / 45.0) % 8;
-        return names[idx] + "§7(§e" + (int) deg + "°§7)";
-    }
-
-    // ==================== 毒圈粒子特效 (Global 线程判定, 玩家区域线程发包) ====================
-
-    /**
-     * 为每个对局内存活玩家生成毒圈视觉:
-     *  - 边界线: 沿当前安全区圆边界, 在玩家附近弧段生成一圈绿色光点 (勾勒圈轮廓)
-     *  - 毒雾:   圈外玩家周围飘散绿色毒雾粒子, 强化"身处毒圈"的危险感
-     * 采用 Player#spawnParticle 纯发包 (任意线程安全), 仅发给个别玩家, 性能可控。
-     * 由独立 particleTask 高频调度 (每 particle-interval-ticks tick 一次)。
-     */
-    private void spawnParticles(World w) {
-        if (!particlesEnabled() || !active) return;
-
-        for (UUID u : game.inGamePlayers()) {
-            Player p = Bukkit.getPlayer(u);
-            if (p == null || !p.isOnline()) continue;
-            if (game.isEliminated(u)) continue;
-            if (!p.getWorld().equals(w)) continue;
-            final Player fp = p;
-            // 在玩家区域线程发包 (Folia 合规: Player#spawnParticle 只发客户端包, 不读世界状态)
-            fp.getScheduler().run(plugin, task -> {
-                try {
-                    Location ploc = fp.getLocation();
-                    double px = ploc.getX(), pz = ploc.getZ();
-                    double py = ploc.getY();
-                    boolean outside = !insideSafeZone(px, pz);
-                    if (boundaryParticlesEnabled()) spawnBoundary(fp, px, pz, py);
-                    if (outside && fogParticlesEnabled()) spawnFog(fp, px, pz, py);
-                } catch (Throwable ignored) {}
-            }, () -> {});
-        }
-    }
-
-    /**
-     * 沿安全区圆边界, 在玩家附近 (within viewRange) 的弧段生成绿色光点。
-     * 只给该玩家看 (单人发包), 圈边界距离玩家近的部分清晰勾勒, 远处不刷避免浪费。
-     * 收缩时粒子略微向内收缩流动, 提示圈在缩小。
-     */
-    private void spawnBoundary(Player p, double px, double pz, double py) {
-        double r = curR;
-        if (r <= 2) return;
-        double view = boundaryViewRange();
-        double viewSq = view * view;
-        int density = boundaryDensity();
-        // 采样间隔角度: 使弧长约 6~8 格 (大圆采样点少, 小圆采样点多)
-        double step = Math.max(0.02, 7.0 / Math.max(1, r));
-        // 玩家到圆心方向为中心, 开一个角度窗口 (只生成玩家附近的弧段)
-        double dxc = px - curX, dzc = pz - curZ;
-        double centerAng = Math.atan2(dzc, dxc);
-        double winDeg = Math.min(Math.PI, (view / Math.max(1, r)) * 2.2 + 0.15);
-        double ang0 = centerAng - winDeg;
-        double angEnd = centerAng + winDeg;
-
-        // 地表高度近似: 用玩家 y 做基准抬高显示 (避免跨区块读高, 保 Folia 合规)
-        double baseY = py + 2.0;
-        // 收缩时粒子轻微向内偏移, 增强"收缩"流动感
-        double shrinkPull = shrinking ? Math.min(3.0, (r - tgtR) * 0.06) : 0;
-        boolean doShrink = shrinkPull > 0.01;
-
-        for (double a = ang0; a < angEnd; a += step) {
-            double x = curX + Math.cos(a) * r;
-            double z = curZ + Math.sin(a) * r;
-            double ddx = x - px, ddz = z - pz;
-            if (ddx * ddx + ddz * ddz > viewSq) continue; // 仅保留玩家附近弧段
-            double offR = r - shrinkPull;
-            double ox = curX + Math.cos(a) * offR;
-            double oz = curZ + Math.sin(a) * offR;
-            // 轻微上下浮动, 让边界更生动
-            double oy = baseY + Math.sin(a * 3.0 + System.currentTimeMillis() * 0.002) * 0.5;
-            for (int i = 0; i < density; i++) {
-                double jitterY = (i - (density - 1) / 2.0) * 0.5;
-                try {
-                    p.spawnParticle(Particle.DUST, ox, oy + jitterY, oz, 1, 0.12, 0.12, 0.12, 0,
-                            new Particle.DustOptions(org.bukkit.Color.LIME, 2.2f));
-                } catch (Throwable ignore) {}
+            catch (Throwable throwable) {
+                // empty catch block
             }
         }
     }
 
-    /**
-     * 圈外毒雾: 玩家周围飘散绿色毒雾粒子 (NOXIOUS_GAS), 提示身处毒圈。
-     * 毒雾浓度随阶段提升 (圈越靠后越浓).
-     */
-    private void spawnFog(Player p, double px, double pz, double py) {
-        double dens = fogDensity() * (1.0 + phase * 0.5);
-        int count = (int) Math.min(8, Math.max(2, dens));
-        for (int i = 0; i < count; i++) {
-            double ox = px + ThreadLocalRandom.current().nextDouble(-1.6, 1.6);
-            double oz = pz + ThreadLocalRandom.current().nextDouble(-1.6, 1.6);
-            double oy = py + ThreadLocalRandom.current().nextDouble(0.2, 2.6);
-            try {
-                p.spawnParticle(Particle.NOXIOUS_GAS, ox, oy, oz, 1, 0.3, 0.3, 0.3, 0.02);
-                if (phase >= 2) {
-                    p.spawnParticle(Particle.SMOKE, ox, oy, oz, 1, 0.2, 0.2, 0.2, 0.01);
-                }
-            } catch (Throwable ignore) {}
-        }
-    }
-
-    /** 当前每秒伤害 (按阶段递增) */
     private double damagePerSecond() {
-        if (!enabled()) return 0;
-        return baseDamage() + phase * damageStepPerPhase();
+        if (!this.enabled()) {
+            return 0.0;
+        }
+        return this.baseDamage() + (double)this.phase * this.damageStepPerPhase();
     }
 
-    /** 判点是否在安全区内 (水平圆) */
-    private boolean insideSafeZone(double x, double z) {
-        double dx = x - curX, dz = z - curZ;
-        return (dx * dx + dz * dz) <= curR * curR;
+    private boolean insideSafeZone(double d, double d2) {
+        double d3 = d - this.curX;
+        double d4 = d2 - this.curZ;
+        return d3 * d3 + d4 * d4 <= this.curR * this.curR;
     }
 
-    // ==================== 工具 ====================
-
-    /** 全服广播某条 & 码消息 (转换后 broadcast Component; Folia 全局安全) */
-    private void broadcast(String raw) {
+    private void broadcast(String string) {
         try {
-            Bukkit.broadcast(net.kyori.adventure.text.serializer.legacy
-                    .LegacyComponentSerializer.legacyAmpersand().deserialize(raw));
-        } catch (Throwable t) {
-            plugin.getLogger().warning("毒圈广播失败: " + t.getMessage());
+            Bukkit.broadcast((Component)LegacyComponentSerializer.legacyAmpersand().deserialize(string));
+        }
+        catch (Throwable throwable) {
+            this.plugin.getLogger().warning("\u6bd2\u5708\u5e7f\u64ad\u5931\u8d25: " + throwable.getMessage());
         }
     }
 
-    /** 对局世界有效半径 (取世界边界的一半, 兜底 512) */
-    private double borderRadius(World w) {
+    private double borderRadius(World world) {
         try {
-            double size = w.getWorldBorder().getSize();
-            if (size <= 0) size = 1024;
-            return size / 2.0 - 8.0; // 留边距
-        } catch (Throwable t) {
+            double d = world.getWorldBorder().getSize();
+            if (d <= 0.0) {
+                d = 1024.0;
+            }
+            return d / 2.0 - 8.0;
+        }
+        catch (Throwable throwable) {
             return 504.0;
         }
     }
 
-    private static double lerp(double a, double b, double t) {
-        return a + (b - a) * t;
+    private static double lerp(double d, double d2, double d3) {
+        return d + (d2 - d) * d3;
     }
 
-    // ==================== 调试/管理 ====================
-
-    /** 当前安全区快照 (供 /box storm status) */
     public String status() {
-        if (!active) return "§7未激活";
-        return "§e第 " + (phase + 1) + "§e/" + phases() + " 阶段 | 圆心 (§b"
-                + (int) curX + "§e, §b" + (int) curZ + "§e) | 半径 §a" + (int) curR
-                + " | 每秒伤害 §c" + String.format("%.1f", damagePerSecond())
-                + (shrinking ? " | §6收缩中..." : " | §e停留 " + remainingSeconds() + " 秒");
+        if (!this.active) {
+            return "\u00a77\u672a\u6fc0\u6d3b";
+        }
+        return "\u00a7e\u7b2c " + (this.phase + 1) + "\u00a7e/" + this.phases() + " \u9636\u6bb5 | \u5706\u5fc3 (\u00a7b" + (int)this.curX + "\u00a7e, \u00a7b" + (int)this.curZ + "\u00a7e) | \u534a\u5f84 \u00a7a" + (int)this.curR + " | \u6bcf\u79d2\u4f24\u5bb3 \u00a7c" + String.format("%.1f", this.damagePerSecond()) + (String)(this.shrinking ? " | \u00a76\u6536\u7f29\u4e2d..." : " | \u00a7e\u505c\u7559 " + this.remainingSeconds() + " \u79d2");
     }
 
     private long remainingSeconds() {
-        long rem = (waitUntil - System.currentTimeMillis()) / 1000;
-        return Math.max(0, rem);
+        long l = (this.waitUntil - System.currentTimeMillis()) / 1000L;
+        return Math.max(0L, l);
     }
 
-    /** 画圈粒子提示 (供管理员调试查看安全区边界) */
-    public void showRing(World w) {
-        if (!active || w == null) return;
-        int steps = 64;
+    public void showRing(World world) {
+        if (!this.active || world == null) {
+            return;
+        }
+        int n = 64;
         try {
-            for (int i = 0; i < steps; i++) {
-                double a = i * Math.PI * 2 / steps;
-                double x = curX + Math.cos(a) * curR;
-                double z = curZ + Math.sin(a) * curR;
-                int y = Math.max(w.getMinHeight() + 1, w.getHighestBlockYAt((int) x, (int) z) + 3);
-                Location loc = new Location(w, x, y, z);
-                w.spawnParticle(Particle.END_ROD, loc, 2, 0.0, 0.0, 0.0, 0.0);
+            for (int i = 0; i < n; ++i) {
+                double d = (double)i * Math.PI * 2.0 / (double)n;
+                double d2 = this.curX + Math.cos(d) * this.curR;
+                double d3 = this.curZ + Math.sin(d) * this.curR;
+                int n2 = Math.max(world.getMinHeight() + 1, world.getHighestBlockYAt((int)d2, (int)d3) + 3);
+                Location location = new Location(world, d2, (double)n2, d3);
+                world.spawnParticle(Particle.END_ROD, location, 2, 0.0, 0.0, 0.0, 0.0);
             }
-        } catch (Throwable t) {
-            plugin.getLogger().warning("毒圈边界粒子显示失败: " + t.getMessage());
+        }
+        catch (Throwable throwable) {
+            this.plugin.getLogger().warning("\u6bd2\u5708\u8fb9\u754c\u7c92\u5b50\u663e\u793a\u5931\u8d25: " + throwable.getMessage());
         }
     }
 }

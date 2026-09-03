@@ -1,311 +1,296 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.Material
+ *  org.bukkit.Sound
+ *  org.bukkit.entity.Player
+ *  org.bukkit.inventory.Inventory
+ *  org.bukkit.inventory.InventoryHolder
+ *  org.bukkit.inventory.ItemStack
+ *  org.bukkit.inventory.meta.ItemMeta
+ */
 package com.terrabox;
 
+import com.terrabox.CraftManager;
+import com.terrabox.GuiListener;
+import com.terrabox.MainMenuGui;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-/**
- * 工作台配方 GUI (54格): 收集碎片/材料 → 合成神器
- *
- * 布局:
- *   0..44 为可交互区, 45..53 为按钮区
- *   材料放置槽: 9 格 (10,11,12, 19,20,21, 28,29,30), 玩家放入碎片/材料
- *   24: 当前配方产出神器预览
- *   46/47: 上/下一个配方 (翻页)
- *   49: 合成按钮  50: 关闭
- *
- * 线程模型: open 由玩家区域线程调用; 点击结算 (收材料/发神器) 也在玩家区域线程 (InventoryClickEvent)。
- */
 public class CraftGui {
-    public static final String TITLE = "§8[§6物资大陆§8] §b神器工作台";
-    // 材料放置槽 (0..44)
-    public static final int[] MAT_SLOTS = {10, 11, 12, 19, 20, 21, 28, 29, 30};
+    public static final String TITLE = "\u00a78[\u00a76\u7269\u8d44\u5927\u9646\u00a78] \u00a7b\u795e\u5668\u5de5\u4f5c\u53f0";
+    public static final int[] MAT_SLOTS = new int[]{10, 11, 12, 19, 20, 21, 28, 29, 30};
     public static final int OUTPUT_SLOT = 24;
     public static final int PREV_SLOT = 46;
     public static final int NEXT_SLOT = 47;
     public static final int CRAFT_SLOT = 49;
     public static final int CLOSE_SLOT = 50;
-
     private final TerraBoxPlugin plugin;
 
-    public CraftGui(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
+    public CraftGui(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
     }
 
-    /** 打开工作台 GUI, 默认显示第一个配方 */
-    public void open(Player p) {
-        GuiListener.GuiHolder holder = new GuiListener.GuiHolder(GuiListener.Type.CRAFT);
-        Inventory inv = Bukkit.createInventory(holder, 54, TITLE);
-        holder.inv = inv;
-        holder.craftIndex = 0;
-        render(p, inv, holder);
-        p.openInventory(inv);
+    public void open(Player player) {
+        Inventory inventory;
+        GuiListener.GuiHolder guiHolder = new GuiListener.GuiHolder(GuiListener.Type.CRAFT);
+        guiHolder.inv = inventory = Bukkit.createInventory((InventoryHolder)guiHolder, (int)54, (String)TITLE);
+        guiHolder.craftIndex = 0;
+        this.render(player, inventory, guiHolder);
+        player.openInventory(inventory);
     }
 
-    /** 渲染当前配方页 (玩家区域线程), 需要公开供 GuiListener 翻页重绘 */
-    public void render(Player p, Inventory inv, GuiListener.GuiHolder holder) {
-        List<CraftManager.Recipe> recipes = plugin.crafts().recipes();
-        inv.clear();
-        // 灰玻璃填充可交互区边缘 (0..8, 36..44) 装饰
-        for (int i = 0; i < 54; i++) {
-            if (isDeco(i)) inv.setItem(i, MainMenuGui.button(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
+    public void render(Player player, Inventory inventory, GuiListener.GuiHolder guiHolder) {
+        Object object;
+        int n;
+        List<CraftManager.Recipe> list = this.plugin.crafts().recipes();
+        inventory.clear();
+        for (n = 0; n < 54; ++n) {
+            if (!this.isDeco(n)) continue;
+            inventory.setItem(n, MainMenuGui.button(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
         }
-
-        // 标题信息 (slot 4)
-        inv.setItem(4, MainMenuGui.button(Material.CRAFTING_TABLE, "§b神器合成",
-                List.of("§7收集碎片/材料, 放入下方格子",
-                        "§7点击合成按钮, 重铸传奇神器",
-                        "", "§7总共 §e" + recipes.size() + " §7条配方")));
-
-        if (recipes.isEmpty()) {
-            inv.setItem(OUTPUT_SLOT, MainMenuGui.button(Material.BARRIER, "§c暂无配方",
-                    List.of("§7请在 config.yml 的 crafting.recipes 段配置")));
-            // 按钮区
-            inv.setItem(PREV_SLOT, MainMenuGui.button(Material.GRAY_DYE, "§7← 上一配方", List.of("")));
-            inv.setItem(NEXT_SLOT, MainMenuGui.button(Material.GRAY_DYE, "§7下一配方 →", List.of("")));
-            inv.setItem(CRAFT_SLOT, MainMenuGui.button(Material.BARRIER, "§c合成", List.of("§7无配方可合成")));
-            inv.setItem(CLOSE_SLOT, MainMenuGui.button(Material.BARRIER, "§c关闭", List.of("§7关闭工作台")));
+        inventory.setItem(4, MainMenuGui.button(Material.CRAFTING_TABLE, "\u00a7b\u795e\u5668\u5408\u6210", List.of("\u00a77\u6536\u96c6\u788e\u7247/\u6750\u6599, \u653e\u5165\u4e0b\u65b9\u683c\u5b50", "\u00a77\u70b9\u51fb\u5408\u6210\u6309\u94ae, \u91cd\u94f8\u4f20\u5947\u795e\u5668", "", "\u00a77\u603b\u5171 \u00a7e" + list.size() + " \u00a77\u6761\u914d\u65b9")));
+        if (list.isEmpty()) {
+            inventory.setItem(24, MainMenuGui.button(Material.BARRIER, "\u00a7c\u6682\u65e0\u914d\u65b9", List.of("\u00a77\u8bf7\u5728 config.yml \u7684 crafting.recipes \u6bb5\u914d\u7f6e")));
+            inventory.setItem(46, MainMenuGui.button(Material.GRAY_DYE, "\u00a77\u2190 \u4e0a\u4e00\u914d\u65b9", List.of("")));
+            inventory.setItem(47, MainMenuGui.button(Material.GRAY_DYE, "\u00a77\u4e0b\u4e00\u914d\u65b9 \u2192", List.of("")));
+            inventory.setItem(49, MainMenuGui.button(Material.BARRIER, "\u00a7c\u5408\u6210", List.of("\u00a77\u65e0\u914d\u65b9\u53ef\u5408\u6210")));
+            inventory.setItem(50, MainMenuGui.button(Material.BARRIER, "\u00a7c\u5173\u95ed", List.of("\u00a77\u5173\u95ed\u5de5\u4f5c\u53f0")));
             return;
         }
-
-        // 索引归一化
-        int idx = holder.craftIndex;
-        if (idx < 0 || idx >= recipes.size()) idx = 0;
-        holder.craftIndex = idx;
-        CraftManager.Recipe recipe = recipes.get(idx);
-
-        // 产出神器预览 (slot 24)
-        ItemStack out = plugin.artifacts().buildItem(recipe.artifact());
-        if (out != null) {
-            ItemMeta om = out.getItemMeta();
-            if (om != null) {
-                List<String> lore = new ArrayList<>();
-                if (om.getLore() != null) lore.addAll(om.getLore());
-                lore.add("");
-                lore.add("§7← 合成产物: §f" + nameOfart(recipe.artifact()));
-                lore.add("§e可合成 §a" + canCraft(inv, recipe) + " §e次");
-                om.setLore(lore);
-                out.setItemMeta(om);
+        n = guiHolder.craftIndex;
+        if (n < 0 || n >= list.size()) {
+            n = 0;
+        }
+        guiHolder.craftIndex = n;
+        CraftManager.Recipe recipe = list.get(n);
+        ItemStack itemStack = this.plugin.artifacts().buildItem(recipe.artifact());
+        if (itemStack != null) {
+            object = itemStack.getItemMeta();
+            if (object != null) {
+                ArrayList<Object> arrayList = new ArrayList<Object>();
+                if (object.getLore() != null) {
+                    arrayList.addAll(object.getLore());
+                }
+                arrayList.add("");
+                arrayList.add("\u00a77\u2190 \u5408\u6210\u4ea7\u7269: \u00a7f" + this.nameOfart(recipe.artifact()));
+                arrayList.add("\u00a7e\u53ef\u5408\u6210 \u00a7a" + this.canCraft(inventory, recipe) + " \u00a7e\u6b21");
+                object.setLore(arrayList);
+                itemStack.setItemMeta((ItemMeta)object);
             }
-            inv.setItem(OUTPUT_SLOT, out);
+            inventory.setItem(24, itemStack);
         } else {
-            inv.setItem(OUTPUT_SLOT, MainMenuGui.button(Material.BARRIER, "§c未知神器",
-                    List.of("§7artifact key: §e" + recipe.artifact())));
+            inventory.setItem(24, MainMenuGui.button(Material.BARRIER, "\u00a7c\u672a\u77e5\u795e\u5668", List.of("\u00a77artifact key: \u00a7e" + recipe.artifact())));
         }
-
-        // 需求预览 (显示材料需求 + 当前拥有) — 只读图标, 放在材料槽上方一行 (3,4,5, 21,22,23 占不了, 用 slot 4? 不行)
-        // 改用材料槽右侧 3 列作需求预览 (14, 15, 23, 32) 或单独区域。这里把需求信息合并进材料槽懒加载说明。
-        // 为直观, 在 slot 24 下方 slot 33 显示"材料需求合计提示"。
-
-        // 材料槽引导: 在每个材料槽放一个提示图标 (空槽显示需求), 玩家放入后覆盖
-        List<String> ingKeys = new ArrayList<>(recipe.ingredients().keySet());
-        for (int i = 0; i < MAT_SLOTS.length; i++) {
-            int slot = MAT_SLOTS[i];
-            ItemStack cur = inv.getItem(slot);
-            if (cur != null && !cur.getType().isAir()) continue; // 已有材料, 保留
-            if (i < ingKeys.size()) {
-                String k = ingKeys.get(i);
-                CraftManager.CraftDef def = craftDef(k);
-                int need = recipe.ingredients().get(k);
-                int have = ownedInBag(p, k);
-                Material placeholder = def != null ? def.material() : Material.BARRIER;
-                inv.setItem(slot, MainMenuGui.button(placeholder,
-                        def != null ? "§7需要: " + amp(def.name()) : "§7未知材料",
-                        List.of("§7需求: §e" + defName(k) + " §7x" + need,
-                                "§7拥有: " + (have >= need ? "§a" : "§c") + have,
-                                "", "§7将碎片/材料点击放入此格")));
-            } else {
-                inv.setItem(slot, MainMenuGui.button(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
-            }
-        }
-
-        // 按钮区
-        inv.setItem(PREV_SLOT, MainMenuGui.button(Material.ARROW, "§7← 上一配方",
-                List.of("§7切换到一个配方")));
-        inv.setItem(NEXT_SLOT, MainMenuGui.button(Material.ARROW, "§7下一配方 →",
-                List.of("§7切换到下一个配方")));
-        inv.setItem(CRAFT_SLOT, MainMenuGui.button(Material.ANVIL, "§a§l合成神器",
-                List.of("§7将上方材料格子中的碎片/材料",
-                        "§7合成对应神器",
-                        "", "§e点击合成")));
-        inv.setItem(CLOSE_SLOT, MainMenuGui.button(Material.BARRIER, "§c关闭", List.of("§7关闭工作台")));
-    }
-
-    /** 翻页前保存当前材料槽中的物品 (供恢复, 避免翻页清空已放材料) */
-    public List<ItemStack> saveMats(Inventory inv) {
-        List<ItemStack> mats = new ArrayList<>();
-        for (int slot : MAT_SLOTS) {
-            ItemStack it = inv.getItem(slot);
-            mats.add(it == null ? null : it.clone());
-        }
-        return mats;
-    }
-
-    /** 翻页后恢复材料槽内容 (raw 渲染已 clear, 重新放回) */
-    public void restoreMats(Inventory inv, List<ItemStack> mats) {
-        if (mats == null || mats.size() != MAT_SLOTS.length) return;
-        for (int i = 0; i < MAT_SLOTS.length; i++) {
-            ItemStack it = mats.get(i);
-            if (it != null) inv.setItem(MAT_SLOTS[i], it.clone());
-        }
-    }
-
-    /** 合成: 校验材料槽并退回多余/不匹配材料, 满足则收走并产出 (玩家区域线程) */
-    public void craft(Player p, Inventory inv, GuiListener.GuiHolder holder) {
-        List<CraftManager.Recipe> recipes = plugin.crafts().recipes();
-        if (recipes.isEmpty()) {
-            p.sendMessage(plugin.msg("prefix") + "§c暂无可用配方。");
-            return;
-        }
-        int idx = holder.craftIndex;
-        if (idx < 0 || idx >= recipes.size()) return;
-        CraftManager.Recipe recipe = recipes.get(idx);
-
-        // 统计材料槽中的碎片/材料
-        Map<String, Integer> placed = new LinkedHashMap<>();
-        List<ItemStack> leftovers = new ArrayList<>();
-        for (int slot : MAT_SLOTS) {
-            ItemStack it = inv.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            String k = plugin.crafts().craftKey(it);
-            if (k == null) {
-                leftovers.add(it); // 非碎片/材料, 退回
-                inv.setItem(slot, null);
+        object = new ArrayList<String>(recipe.ingredients().keySet());
+        for (int i = 0; i < MAT_SLOTS.length; ++i) {
+            int n2 = MAT_SLOTS[i];
+            ItemStack itemStack2 = inventory.getItem(n2);
+            if (itemStack2 != null && !itemStack2.getType().isAir()) continue;
+            if (i < object.size()) {
+                String string = (String)object.get(i);
+                CraftManager.CraftDef craftDef = this.craftDef(string);
+                int n3 = recipe.ingredients().get(string);
+                int n4 = this.ownedInBag(player, string);
+                Material material = craftDef != null ? craftDef.material() : Material.BARRIER;
+                inventory.setItem(n2, MainMenuGui.button(material, (String)(craftDef != null ? "\u00a77\u9700\u8981: " + CraftGui.amp(craftDef.name()) : "\u00a77\u672a\u77e5\u6750\u6599"), List.of("\u00a77\u9700\u6c42: \u00a7e" + this.defName(string) + " \u00a77x" + n3, "\u00a77\u62e5\u6709: " + (n4 >= n3 ? "\u00a7a" : "\u00a7c") + n4, "", "\u00a77\u5c06\u788e\u7247/\u6750\u6599\u70b9\u51fb\u653e\u5165\u6b64\u683c")));
                 continue;
             }
-            placed.merge(k, it.getAmount(), Integer::sum);
+            inventory.setItem(n2, MainMenuGui.button(Material.GRAY_STAINED_GLASS_PANE, " ", List.of()));
         }
+        inventory.setItem(46, MainMenuGui.button(Material.ARROW, "\u00a77\u2190 \u4e0a\u4e00\u914d\u65b9", List.of("\u00a77\u5207\u6362\u5230\u4e00\u4e2a\u914d\u65b9")));
+        inventory.setItem(47, MainMenuGui.button(Material.ARROW, "\u00a77\u4e0b\u4e00\u914d\u65b9 \u2192", List.of("\u00a77\u5207\u6362\u5230\u4e0b\u4e00\u4e2a\u914d\u65b9")));
+        inventory.setItem(49, MainMenuGui.button(Material.ANVIL, "\u00a7a\u00a7l\u5408\u6210\u795e\u5668", List.of("\u00a77\u5c06\u4e0a\u65b9\u6750\u6599\u683c\u5b50\u4e2d\u7684\u788e\u7247/\u6750\u6599", "\u00a77\u5408\u6210\u5bf9\u5e94\u795e\u5668", "", "\u00a7e\u70b9\u51fb\u5408\u6210")));
+        inventory.setItem(50, MainMenuGui.button(Material.BARRIER, "\u00a7c\u5173\u95ed", List.of("\u00a77\u5173\u95ed\u5de5\u4f5c\u53f0")));
+    }
 
-        // 校验是否满足配方
-        boolean ok = true;
-        for (Map.Entry<String, Integer> e : recipe.ingredients().entrySet()) {
-            int have = placed.getOrDefault(e.getKey(), 0);
-            if (have < e.getValue()) { ok = false; break; }
+    public List<ItemStack> saveMats(Inventory inventory) {
+        ArrayList<ItemStack> arrayList = new ArrayList<ItemStack>();
+        for (int n : MAT_SLOTS) {
+            ItemStack itemStack = inventory.getItem(n);
+            arrayList.add(itemStack == null ? null : itemStack.clone());
         }
+        return arrayList;
+    }
 
-        if (!ok) {
-            p.sendMessage(plugin.msg("prefix") + "§c材料不足或缺失, 无法合成 "
-                    + nameOfart(recipe.artifact()) + "。");
-            p.playSound(p.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1.2f);
-            // 多余材料退回背包; 让玩家保留已放好的 (不清空)
-            returnAlloc(inv, leftovers, placed, p);
-            render(p, inv, holder);
+    public void restoreMats(Inventory inventory, List<ItemStack> list) {
+        if (list == null || list.size() != MAT_SLOTS.length) {
             return;
         }
+        for (int i = 0; i < MAT_SLOTS.length; ++i) {
+            ItemStack itemStack = list.get(i);
+            if (itemStack == null) continue;
+            inventory.setItem(MAT_SLOTS[i], itemStack.clone());
+        }
+    }
 
-        // 满足: 从材料槽扣除所需材料
-        Map<String, Integer> toConsume = new LinkedHashMap<>(recipe.ingredients());
-        for (int slot : MAT_SLOTS) {
-            ItemStack it = inv.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            String k = plugin.crafts().craftKey(it);
-            if (k == null) { leftovers.add(it); inv.setItem(slot, null); continue; }
-            int remainingNeed = toConsume.getOrDefault(k, 0);
-            if (remainingNeed <= 0) {
-                // 多余材料退回
-                leftovers.add(it);
-                inv.setItem(slot, null);
+    /*
+     * WARNING - void declaration
+     */
+    public void craft(Player player, Inventory inventory, GuiListener.GuiHolder guiHolder) {
+        int n;
+        void entry;
+        List<CraftManager.Recipe> list = this.plugin.crafts().recipes();
+        if (list.isEmpty()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6682\u65e0\u53ef\u7528\u914d\u65b9\u3002");
+            return;
+        }
+        int n2 = guiHolder.craftIndex;
+        if (n2 < 0 || n2 >= list.size()) {
+            return;
+        }
+        CraftManager.Recipe recipe = list.get(n2);
+        LinkedHashMap<String, Integer> linkedHashMap = new LinkedHashMap<String, Integer>();
+        ArrayList<ItemStack> arrayList = new ArrayList<ItemStack>();
+        int[] nArray = MAT_SLOTS;
+        int n3 = nArray.length;
+        boolean bl = false;
+        while (entry < n3) {
+            n = nArray[entry];
+            ItemStack itemStack = inventory.getItem(n);
+            if (itemStack != null && !itemStack.getType().isAir()) {
+                String itemStack2 = this.plugin.crafts().craftKey(itemStack);
+                if (itemStack2 == null) {
+                    arrayList.add(itemStack);
+                    inventory.setItem(n, null);
+                } else {
+                    linkedHashMap.merge(itemStack2, itemStack.getAmount(), Integer::sum);
+                }
+            }
+            ++entry;
+        }
+        boolean bl2 = true;
+        for (Map.Entry<String, Integer> object : recipe.ingredients().entrySet()) {
+            n = linkedHashMap.getOrDefault(object.getKey(), 0);
+            if (n >= object.getValue()) continue;
+            bl2 = false;
+            break;
+        }
+        if (!bl2) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6750\u6599\u4e0d\u8db3\u6216\u7f3a\u5931, \u65e0\u6cd5\u5408\u6210 " + this.nameOfart(recipe.artifact()) + "\u3002");
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1.0f, 1.2f);
+            this.returnAlloc(inventory, arrayList, linkedHashMap, player);
+            this.render(player, inventory, guiHolder);
+            return;
+        }
+        LinkedHashMap<String, Integer> linkedHashMap2 = new LinkedHashMap<String, Integer>(recipe.ingredients());
+        for (int n4 : MAT_SLOTS) {
+            ItemStack itemStack = inventory.getItem(n4);
+            if (itemStack == null || itemStack.getType().isAir()) continue;
+            String string = this.plugin.crafts().craftKey(itemStack);
+            if (string == null) {
+                arrayList.add(itemStack);
+                inventory.setItem(n4, null);
                 continue;
             }
-            int take = Math.min(it.getAmount(), remainingNeed);
-            int rest = it.getAmount() - take;
-            if (rest > 0) {
-                it.setAmount(rest);
-                inv.setItem(slot, it);
-            } else {
-                inv.setItem(slot, null);
+            int n5 = linkedHashMap2.getOrDefault(string, 0);
+            if (n5 <= 0) {
+                arrayList.add(itemStack);
+                inventory.setItem(n4, null);
+                continue;
             }
-            toConsume.put(k, remainingNeed - take);
+            int n6 = Math.min(itemStack.getAmount(), n5);
+            int n7 = itemStack.getAmount() - n6;
+            if (n7 > 0) {
+                itemStack.setAmount(n7);
+                inventory.setItem(n4, itemStack);
+            } else {
+                inventory.setItem(n4, null);
+            }
+            linkedHashMap2.put(string, n5 - n6);
         }
-
-        // 产出神器
-        ItemStack out = plugin.artifacts().buildItem(recipe.artifact());
-        if (out == null) {
-            p.sendMessage(plugin.msg("prefix") + "§c神器构建失败, 材料已退还。");
-            returnAlloc(inv, new ArrayList<>(), placed, p);
-            render(p, inv, holder);
+        ItemStack itemStack = this.plugin.artifacts().buildItem(recipe.artifact());
+        if (itemStack == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u795e\u5668\u6784\u5efa\u5931\u8d25, \u6750\u6599\u5df2\u9000\u8fd8\u3002");
+            this.returnAlloc(inventory, new ArrayList<ItemStack>(), linkedHashMap, player);
+            this.render(player, inventory, guiHolder);
             return;
         }
-        // 放入背包 (溢出丢弃)
-        var map = p.getInventory().addItem(out);
-        for (ItemStack rest : map.values()) {
-            p.getWorld().dropItemNaturally(p.getLocation(), rest);
+        HashMap hashMap = player.getInventory().addItem(new ItemStack[]{itemStack});
+        for (ItemStack itemStack3 : hashMap.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), itemStack3);
         }
-        p.sendMessage(plugin.msg("prefix") + "§a成功合成神器: §f" + nameOfart(recipe.artifact()) + "!");
-        p.playSound(p.getLocation(), Sound.ITEM_ARMOR_EQUIP_NETHERITE, 1f, 1.2f);
-        // 退回多余材料
-        returnAlloc(inv, leftovers, new LinkedHashMap<>(), p);
-        // 清空材料槽并刷新
-        for (int slot : MAT_SLOTS) inv.setItem(slot, null);
-        render(p, inv, holder);
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u6210\u529f\u5408\u6210\u795e\u5668: \u00a7f" + this.nameOfart(recipe.artifact()) + "!");
+        player.playSound(player.getLocation(), Sound.ITEM_ARMOR_EQUIP_NETHERITE, 1.0f, 1.2f);
+        this.returnAlloc(inventory, arrayList, new LinkedHashMap<String, Integer>(), player);
+        for (Object object : (Object)MAT_SLOTS) {
+            inventory.setItem((int)object, null);
+        }
+        this.render(player, inventory, guiHolder);
     }
 
-    /** 把多余的碎片/材料退回到玩家背包或脚下 */
-    private void returnAlloc(Inventory inv, List<ItemStack> leftovers, Map<String, Integer> placed, Player p) {
-        for (ItemStack it : leftovers) {
-            var m = p.getInventory().addItem(it);
-            for (ItemStack r : m.values()) p.getWorld().dropItemNaturally(p.getLocation(), r);
+    private void returnAlloc(Inventory inventory, List<ItemStack> list, Map<String, Integer> map, Player player) {
+        for (ItemStack itemStack : list) {
+            HashMap hashMap = player.getInventory().addItem(new ItemStack[]{itemStack});
+            for (ItemStack itemStack2 : hashMap.values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), itemStack2);
+            }
         }
     }
 
-    /** 玩家背包中某种碎片/材料的拥有量 */
-    private int ownedInBag(Player p, String key) {
+    private int ownedInBag(Player player, String string) {
         int n = 0;
-        for (ItemStack it : p.getInventory().getContents()) {
-            if (it == null) continue;
-            String k = plugin.crafts().craftKey(it);
-            if (key.equals(k)) n += it.getAmount();
+        for (ItemStack itemStack : player.getInventory().getContents()) {
+            String string2;
+            if (itemStack == null || !string.equals(string2 = this.plugin.crafts().craftKey(itemStack))) continue;
+            n += itemStack.getAmount();
         }
         return n;
     }
 
-    /** 当前材料槽能满足配方的次数 (只读) */
-    private int canCraft(Inventory inv, CraftManager.Recipe recipe) {
-        Map<String, Integer> placed = new LinkedHashMap<>();
-        for (int slot : MAT_SLOTS) {
-            ItemStack it = inv.getItem(slot);
-            if (it == null || it.getType().isAir()) continue;
-            String k = plugin.crafts().craftKey(it);
-            if (k != null) placed.merge(k, it.getAmount(), Integer::sum);
+    private int canCraft(Inventory inventory, CraftManager.Recipe recipe) {
+        LinkedHashMap<String, Integer> linkedHashMap = new LinkedHashMap<String, Integer>();
+        for (int n2 : MAT_SLOTS) {
+            String string;
+            ItemStack itemStack = inventory.getItem(n2);
+            if (itemStack == null || itemStack.getType().isAir() || (string = this.plugin.crafts().craftKey(itemStack)) == null) continue;
+            linkedHashMap.merge(string, itemStack.getAmount(), Integer::sum);
         }
-        int times = Integer.MAX_VALUE;
-        for (Map.Entry<String, Integer> e : recipe.ingredients().entrySet()) {
-            int have = placed.getOrDefault(e.getKey(), 0);
-            times = Math.min(times, have / Math.max(1, e.getValue()));
+        int n = Integer.MAX_VALUE;
+        for (Map.Entry<String, Integer> entry : recipe.ingredients().entrySet()) {
+            int n2;
+            n2 = linkedHashMap.getOrDefault(entry.getKey(), 0);
+            n = Math.min(n, n2 / Math.max(1, entry.getValue()));
         }
-        return times == Integer.MAX_VALUE ? 0 : times;
+        return n == Integer.MAX_VALUE ? 0 : n;
     }
 
-    private boolean isDeco(int slot) {
-        // 0..8 和 36..44 及按钮空位 = 装饰, 其余可交互
-        return slot <= 8 || (slot >= 36 && slot <= 44);
+    private boolean isDeco(int n) {
+        return n <= 8 || n >= 36 && n <= 44;
     }
 
-    private CraftManager.CraftDef craftDef(String key) {
-        for (CraftManager.CraftDef d : plugin.crafts().defs()) if (d.key().equalsIgnoreCase(key)) return d;
+    private CraftManager.CraftDef craftDef(String string) {
+        for (CraftManager.CraftDef craftDef : this.plugin.crafts().defs()) {
+            if (!craftDef.key().equalsIgnoreCase(string)) continue;
+            return craftDef;
+        }
         return null;
     }
 
-    private String defName(String key) {
-        CraftManager.CraftDef d = craftDef(key);
-        return d != null ? amp(d.name()) : key;
+    private String defName(String string) {
+        CraftManager.CraftDef craftDef = this.craftDef(string);
+        return craftDef != null ? CraftGui.amp(craftDef.name()) : string;
     }
 
-    private String nameOfart(String key) {
-        return plugin.artifacts().nameOf(key);
+    private String nameOfart(String string) {
+        return this.plugin.artifacts().nameOf(string);
     }
 
-    /** & 码 → § 码 (GUI 显示用) */
-    private static String amp(String s) {
-        return s == null ? "" : s.replace('&', '\u00A7');
+    private static String amp(String string) {
+        return string == null ? "" : string.replace('&', '\u00a7');
     }
 }

@@ -1,545 +1,760 @@
+/*
+ * Decompiled with CFR 0.152.
+ * 
+ * Could not load the following classes:
+ *  org.bukkit.Bukkit
+ *  org.bukkit.OfflinePlayer
+ *  org.bukkit.Sound
+ *  org.bukkit.command.Command
+ *  org.bukkit.command.CommandExecutor
+ *  org.bukkit.command.CommandSender
+ *  org.bukkit.command.TabCompleter
+ *  org.bukkit.entity.Player
+ *  org.bukkit.plugin.Plugin
+ */
 package com.terrabox;
 
+import com.terrabox.GameManager;
+import com.terrabox.PlayerStore;
+import com.terrabox.Rarity;
+import com.terrabox.RoomManager;
+import com.terrabox.TerraBoxPlugin;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.Sound;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
-/**
- * /box 命令: 玩家执行在玩家区域线程, 控制台在 Global Region 线程 (白皮书 §7.1)
- * 仅做: 参数分发 / 消息发送 / 注册表快照读取, 方块与实体操作全部走各服务调度链
- */
-public class TerraCommand implements CommandExecutor, TabCompleter {
+public class TerraCommand
+implements CommandExecutor,
+TabCompleter {
     private final TerraBoxPlugin plugin;
-
-    public TerraCommand(TerraBoxPlugin plugin) {
-        this.plugin = plugin;
-    }
-
-    @Override
-    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-        String sub = args.length == 0 ? "" : args[0].toLowerCase(java.util.Locale.ROOT);
-
-        if (sub.equals("reload") && hasAdmin(sender)) {
-            plugin.reloadConfig();
-            plugin.specialItems().load();
-            plugin.loot().load();
-            sender.sendMessage(plugin.msg("reloaded"));
-            return true;
-        }
-        if (sub.equals("admin")) {
-            return admin(sender, args);
-        }
-
-        if (!(sender instanceof Player p)) {
-            sender.sendMessage(plugin.msg("player-only"));
-            return true;
-        }
-
-        switch (sub) {
-            case "" -> plugin.menus().open(p);
-            case "spawn" -> {
-                if (!plugin.worlds().isReady()) { p.sendMessage(plugin.msg("not-ready")); return true; }
-                plugin.spawns().spawnPlayer(p, true);
-            }
-            case "sell" -> plugin.sells().open(p);
-            case "hunt" -> plugin.hunts().hunt(p);
-            case "top" -> sendTop(p);
-            case "stats" -> sendStats(p, p);
-            case "prices" -> sendPrices(p);
-            case "balance" -> sendBalance(p);
-            case "join" -> plugin.rooms().toggleJoin(p);
-            case "lobby" -> plugin.rooms().requestReturnToLobby(p);
-            case "spectate" -> plugin.rooms().spectate(p);
-            case "storm" -> storm(p);
-            case "invite" -> invite(p, args);
-            case "room" -> room(p, args);
-            case "terrain" -> {
-                if (!hasAdmin(p)) return true;
-                plugin.terrainSelect().open(p);
-            }
-            case "game" -> {
-                if (args.length < 2) { sendGameStatus(p); return true; }
-                String gsub = args[1].toLowerCase(java.util.Locale.ROOT);
-                switch (gsub) {
-                    case "join" -> plugin.rooms().toggleJoin(p);
-                    case "status" -> sendGameStatus(p);
-                    case "start" -> {
-                        if (!hasAdmin(p)) return true;
-                        GameManager.Mode m = args.length >= 3 ? GameManager.Mode.parse(args[2]) : GameManager.Mode.PVP;
-                        if (m == null) {
-                            p.sendMessage(plugin.msg("prefix") + "§c模式无效, 可选: solo / pvp / team");
-                            return true;
-                        }
-                        if (!plugin.worlds().isReady()) { p.sendMessage(plugin.msg("not-ready")); return true; }
-                        plugin.games().startGame(p, m);
-                    }
-                    case "stop" -> {
-                        if (!hasAdmin(p)) return true;
-                        plugin.games().stopGame(p);
-                    }
-                    default -> sendGameStatus(p);
-                }
-            }
-            case "help" -> sendHelp(p);
-            default -> p.sendMessage(plugin.msg("prefix") + "§7未知子命令, 输入 §e/box help §7查看帮助。");
-        }
-        return true;
-    }
-
-    /** /box storm: 查看/显示当前毒圈状态 (管理圈显示) */
-    private void storm(Player p) {
-        GameManager g = plugin.games();
-        if (!p.hasPermission("terrabox.admin") && g.storm() != null && g.storm().isActive()) {
-            // 普通玩家: 只显示自己所在房间毒圈状态
-            p.sendMessage(plugin.msg("prefix") + "§6毒圈: " + (g.storm() != null ? g.storm().status() : "§7未激活"));
-            return;
-        }
-        if (!hasAdmin(p)) return;
-        if (g.storm() == null) { p.sendMessage(plugin.msg("prefix") + "§c毒圈未初始化。"); return; }
-        p.sendMessage(plugin.msg("prefix") + "§6===== 毒圈状态 =====");
-        p.sendMessage(" " + (g.storm().isActive() ? g.storm().status() : "§7未激活"));
-        p.sendMessage(" §7阶段数: §e" + plugin.getConfig().getInt("storm.phases", 5)
-                + " §7| 每阶段等待: §e" + plugin.getConfig().getLong("storm.wait-seconds", 60)
-                + " §7秒 | 收缩时长: §e" + plugin.getConfig().getLong("storm.shrink-duration-seconds", 40) + " §7秒");
-        if (g.storm().isActive() && g.roomWorld() != null) {
-            g.storm().showRing(g.roomWorld());
-            p.sendMessage(" §a已在当前世界显示安全区边界粒子。");
-        }
-    }
-
-    /** 对局状态输出 */
-    public void sendGameStatus(org.bukkit.command.CommandSender to) {
-        GameManager g = plugin.games();
-        to.sendMessage(plugin.msg("prefix") + "§e===== 对局状态 =====");
-        to.sendMessage(" §7模式: " + g.modeDisplay() + "  §7状态: " + g.stateDisplay());
-        to.sendMessage(" §7参战: §e" + g.playerCount() + " §7人" + (g.state() == GameManager.State.RUNNING
-                ? "  §7存活: §a" + g.aliveCount() + " §7人" : "  §7已报名: §e" + g.joinedCount() + " §7人"));
-        if (g.state() == GameManager.State.COUNTDOWN) {
-            to.sendMessage(" §7即将开始, 报名中... 管理员可用 §e/box game start <solo|pvp|team> §7开赛");
-        } else if (g.state() == GameManager.State.IDLE) {
-            to.sendMessage(" §7空闲. 输入 §e/box game join §7报名, 管理员 §e/box game start <solo|pvp|team> §7开赛");
-        }
-    }
-
-    private boolean admin(CommandSender sender, String[] args) {
-        if (!hasAdmin(sender)) return true;
-        String sub = args.length > 1 ? args[1].toLowerCase(java.util.Locale.ROOT) : "";
-        switch (sub) {
-            case "boxes" -> {
-                sender.sendMessage(plugin.msg("prefix") + "§e物资箱总数: §a" + plugin.boxes().count()
-                        + "§e/" + plugin.getConfig().getInt("boxes.max-count", 320));
-                for (Map.Entry<Rarity, Integer> en : plugin.boxes().countByRarity().entrySet()) {
-                    sender.sendMessage(" §7" + en.getKey().display + ": " + en.getValue() + " 个");
-                }
-                sender.sendMessage(" §7预生成: " + (plugin.worlds().pregenRunning()
-                        ? "进行中 " + plugin.worlds().pregenDone() + "/" + plugin.worlds().pregenTotal()
-                        : (plugin.worlds().isReady() ? "完成" : "等待世界...")));
-            }
-            case "fill" -> {
-                if (!plugin.worlds().isReady()) { sender.sendMessage(plugin.msg("not-ready")); return true; }
-                int n = Math.min(40, plugin.boxMaxCount() - plugin.boxes().count());
-                for (int i = 0; i < n; i++) plugin.boxes().spawnRandomBox(plugin.weightedPickForWorld(), false, null);
-                sender.sendMessage(plugin.msg("prefix") + "§a已投放 " + n + " 个随机物资箱。");
-            }
-            case "airdrop" -> {
-                if (!plugin.worlds().isReady()) { sender.sendMessage(plugin.msg("not-ready")); return true; }
-                sender.sendMessage(plugin.msg("prefix") + "§d立即空投!");
-                plugin.airdrops().dropNow(null);
-            }
-            case "wipe" -> handleWipe(sender);
-            default -> sender.sendMessage(plugin.msg("prefix")
-                    + "§e/box admin boxes|fill|airdrop|wipe");
-        }
-        return true;
-    }
-
     private boolean wipeArmed = false;
 
-    /** /box room 房间管理 (玩家可用: create/list/invite/join/leave/info; 管理员: start/stop/remove/force) */
-    private void room(Player p, String[] args) {
-        RoomManager mgr = plugin.rooms();
-        // 无参数: 打开房间 GUI (查看所有在线房间)
-        if (args.length < 2) {
-            plugin.roomGui().open(p);
-            return;
+    public TerraCommand(TerraBoxPlugin terraBoxPlugin) {
+        this.plugin = terraBoxPlugin;
+    }
+
+    public boolean onCommand(CommandSender commandSender, Command command, String string, String[] stringArray) {
+        String string2;
+        String string3 = string2 = stringArray.length == 0 ? "" : stringArray[0].toLowerCase(Locale.ROOT);
+        if (string2.equals("reload") && this.hasAdmin(commandSender)) {
+            this.plugin.reloadConfig();
+            this.plugin.specialItems().load();
+            this.plugin.loot().load();
+            commandSender.sendMessage(this.plugin.msg("reloaded"));
+            return true;
         }
-        String sub = args[1].toLowerCase(java.util.Locale.ROOT);
-        switch (sub) {
-            case "list" -> sendRoomList(p);
-            case "create" -> createRoomFor(p, args.length >= 3 ? args[2] : null);
-            case "invite" -> {
-                // /box room invite <玩家> [房间] — 邀请玩家加入自己的房间
-                if (args.length < 3) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room invite <玩家> [房间]"); return; }
-                Player target = Bukkit.getPlayer(args[2]);
-                if (target == null) { p.sendMessage(plugin.msg("prefix") + "§c玩家不在线: " + args[2]); return; }
-                String roomId = args.length >= 4 ? args[3] : myRoom(p);
-                plugin.invites().invite(p, target, roomId);
+        if (string2.equals("admin")) {
+            return this.admin(commandSender, stringArray);
+        }
+        if (!(commandSender instanceof Player)) {
+            commandSender.sendMessage(this.plugin.msg("player-only"));
+            return true;
+        }
+        Player player = (Player)commandSender;
+        block19 : switch (string2) {
+            case "": {
+                this.plugin.menus().open(player);
+                break;
             }
-            case "join" -> {
-                if (args.length < 3) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room join <id>"); return; }
-                GameManager g = mgr.get(args[2]);
-                if (g == null) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + args[2] + " 不存在"); return; }
-                g.join(p);
-            }
-            case "leave" -> {
-                if (args.length < 3) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room leave <id>"); return; }
-                GameManager g = mgr.get(args[2]);
-                if (g != null) g.leave(p);
-            }
-            case "info" -> {
-                if (args.length < 3) { sendRoomList(p); return; }
-                sendRoomInfo(p, mgr.get(args[2]));
-            }
-            // ===== 管理员功能 =====
-            case "remove" -> {
-                if (!hasAdmin(p)) return;
-                if (args.length < 3) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room remove <id>"); return; }
-                String id = args[2];
-                if (!mgr.hasRoom(id)) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + id + " 不存在"); return; }
-                if ("default".equalsIgnoreCase(id)) { p.sendMessage(plugin.msg("prefix") + "§c不能删除默认房间"); return; }
-                GameManager g = mgr.get(id);
-                if (g != null && g.isRunning()) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + id + " 对局进行中, 先停止"); return; }
-                mgr.removeRoom(id);
-                p.sendMessage(plugin.msg("prefix") + "§a已删除对局房间 §e" + id);
-            }
-            case "start" -> {
-                if (!hasAdmin(p)) return;
-                if (args.length < 4) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room start <id> <solo|pvp|team>"); return; }
-                String id = args[2];
-                GameManager.Mode m = args.length >= 4 ? GameManager.Mode.parse(args[3]) : GameManager.Mode.PVP;
-                GameManager g = mgr.get(id);
-                if (g == null) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + id + " 不存在"); return; }
-                if (m != null) g.startGame(p, m);
-            }
-            case "stop" -> {
-                if (!hasAdmin(p)) return;
-                if (args.length < 3) { p.sendMessage(plugin.msg("prefix") + "§c用法: /box room stop <id>"); return; }
-                GameManager g = mgr.get(args[2]);
-                if (g == null) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + args[2] + " 不存在"); return; }
-                g.stopGame(p);
-            }
-            case "force" -> {
-                if (!hasAdmin(p)) return;
-                // 管理员强制把玩家加入某房间
-                if (args.length < 4) { p.sendMessage(plugin.msg("prefix") + "§e用法: /box room force <玩家> <房间>"); return; }
-                Player target = Bukkit.getPlayer(args[2]);
-                if (target == null) { p.sendMessage(plugin.msg("prefix") + "§c玩家不在线: " + args[2]); return; }
-                GameManager g = mgr.get(args[3]);
-                if (g == null) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + args[3] + " 不存在"); return; }
-                if (g.join(target)) {
-                    p.sendMessage(plugin.msg("prefix") + "§a已强制 §e" + target.getName() + " §a加入房间 §e" + args[3]);
-                    target.sendMessage(plugin.msg("prefix") + "§e管理员将你加入了房间 §b" + args[3]);
+            case "spawn": {
+                if (!this.plugin.worlds().isReady()) {
+                    player.sendMessage(this.plugin.msg("not-ready"));
+                    return true;
                 }
+                this.plugin.spawns().spawnPlayer(player, true);
+                break;
             }
-            case "status" -> {
-                if (args.length < 3) { sendRoomList(p); return; }
-                if (!hasAdmin(p)) return;
-                sendRoomInfo(p, mgr.get(args[2]));
+            case "sell": {
+                this.plugin.sells().open(player);
+                break;
             }
-            default -> sendRoomList(p);
+            case "hunt": {
+                this.plugin.hunts().hunt(player);
+                break;
+            }
+            case "top": {
+                this.sendTop((CommandSender)player);
+                break;
+            }
+            case "stats": {
+                this.sendStats((CommandSender)player, player);
+                break;
+            }
+            case "prices": {
+                this.sendPrices((CommandSender)player);
+                break;
+            }
+            case "balance": {
+                this.sendBalance((CommandSender)player);
+                break;
+            }
+            case "join": {
+                this.plugin.rooms().toggleJoin(player);
+                break;
+            }
+            case "lobby": {
+                this.plugin.rooms().requestReturnToLobby(player);
+                break;
+            }
+            case "spectate": {
+                this.plugin.rooms().spectate(player);
+                break;
+            }
+            case "storm": {
+                this.storm(player);
+                break;
+            }
+            case "invite": {
+                this.invite(player, stringArray);
+                break;
+            }
+            case "room": {
+                this.room(player, stringArray);
+                break;
+            }
+            case "terrain": {
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return true;
+                }
+                this.plugin.terrainSelect().open(player);
+                break;
+            }
+            case "game": {
+                String string4;
+                if (stringArray.length < 2) {
+                    this.sendGameStatus((CommandSender)player);
+                    return true;
+                }
+                switch (string4 = stringArray[1].toLowerCase(Locale.ROOT)) {
+                    case "join": {
+                        this.plugin.rooms().toggleJoin(player);
+                        break block19;
+                    }
+                    case "status": {
+                        this.sendGameStatus((CommandSender)player);
+                        break block19;
+                    }
+                    case "start": {
+                        GameManager.Mode mode;
+                        if (!this.hasAdmin((CommandSender)player)) {
+                            return true;
+                        }
+                        GameManager.Mode mode2 = mode = stringArray.length >= 3 ? GameManager.Mode.parse(stringArray[2]) : GameManager.Mode.PVP;
+                        if (mode == null) {
+                            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6a21\u5f0f\u65e0\u6548, \u53ef\u9009: solo / pvp / team");
+                            return true;
+                        }
+                        if (!this.plugin.worlds().isReady()) {
+                            player.sendMessage(this.plugin.msg("not-ready"));
+                            return true;
+                        }
+                        this.plugin.games().startGame((CommandSender)player, mode);
+                        break block19;
+                    }
+                    case "stop": {
+                        if (!this.hasAdmin((CommandSender)player)) {
+                            return true;
+                        }
+                        this.plugin.games().stopGame((CommandSender)player);
+                        break block19;
+                    }
+                }
+                this.sendGameStatus((CommandSender)player);
+                break;
+            }
+            case "help": {
+                this.sendHelp(player);
+                break;
+            }
+            default: {
+                player.sendMessage(this.plugin.msg("prefix") + "\u00a77\u672a\u77e5\u5b50\u547d\u4ee4, \u8f93\u5165 \u00a7e/box help \u00a77\u67e5\u770b\u5e2e\u52a9\u3002");
+            }
         }
+        return true;
     }
 
-    /** 创建房间 (玩家可用), id 为空则自动命名 room_<时间戳末位> */
-    public void createRoomFor(Player p, String id) {
-        RoomManager mgr = plugin.rooms();
-        String roomId = id;
-        if (roomId == null || roomId.isBlank()) {
-            int n = (int) (System.currentTimeMillis() % 1000);
-            roomId = "room_" + n;
-            while (mgr.hasRoom(roomId)) { roomId = "room_" + (n++); }
-        }
-        roomId = roomId.toLowerCase(java.util.Locale.ROOT);
-        if (mgr.hasRoom(roomId)) { p.sendMessage(plugin.msg("prefix") + "§c房间 " + roomId + " 已存在"); return; }
-        String worldName = plugin.worlds().world() != null ? plugin.worlds().world().getName() : null;
-        GameManager g = mgr.createRoom(roomId, worldName);
-        g.setOwner(p.getUniqueId());
-        p.sendMessage(plugin.msg("prefix") + "§a已创建对局房间 §e" + roomId + " §a(你是房主, 可用 /box room invite <玩家> 邀请)");
-        p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.3f);
-    }
-
-    /** /box invite accept|decline — 聊天框点击接受/拒绝房间邀请 */
-    private void invite(Player p, String[] args) {
-        if (args.length < 2) {
-            p.sendMessage(plugin.msg("prefix") + "§e用法: §f/box invite accept|decline §7(点击聊天框邀请文本即可)");
+    private void storm(Player player) {
+        GameManager gameManager = this.plugin.games();
+        if (!player.hasPermission("terrabox.admin") && gameManager.storm() != null && gameManager.storm().isActive()) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a76\u6bd2\u5708: " + (gameManager.storm() != null ? gameManager.storm().status() : "\u00a77\u672a\u6fc0\u6d3b"));
             return;
         }
-        switch (args[1].toLowerCase(java.util.Locale.ROOT)) {
-            case "accept" -> plugin.invites().accept(p);
-            case "decline" -> plugin.invites().decline(p);
-            default -> p.sendMessage(plugin.msg("prefix") + "§e用法: §f/box invite accept|decline");
+        if (!this.hasAdmin((CommandSender)player)) {
+            return;
+        }
+        if (gameManager.storm() == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6bd2\u5708\u672a\u521d\u59cb\u5316\u3002");
+            return;
+        }
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a76===== \u6bd2\u5708\u72b6\u6001 =====");
+        player.sendMessage(" " + (gameManager.storm().isActive() ? gameManager.storm().status() : "\u00a77\u672a\u6fc0\u6d3b"));
+        player.sendMessage(" \u00a77\u9636\u6bb5\u6570: \u00a7e" + this.plugin.getConfig().getInt("storm.phases", 5) + " \u00a77| \u6bcf\u9636\u6bb5\u7b49\u5f85: \u00a7e" + this.plugin.getConfig().getLong("storm.wait-seconds", 60L) + " \u00a77\u79d2 | \u6536\u7f29\u65f6\u957f: \u00a7e" + this.plugin.getConfig().getLong("storm.shrink-duration-seconds", 40L) + " \u00a77\u79d2");
+        if (gameManager.storm().isActive() && gameManager.roomWorld() != null) {
+            gameManager.storm().showRing(gameManager.roomWorld());
+            player.sendMessage(" \u00a7a\u5df2\u5728\u5f53\u524d\u4e16\u754c\u663e\u793a\u5b89\u5168\u533a\u8fb9\u754c\u7c92\u5b50\u3002");
         }
     }
 
-    /** 玩家报名最多的房间 (邀请默认目标) */
-    private String myRoom(Player p) {
-        for (GameManager g : plugin.rooms().joinedRooms(p.getUniqueId())) return g.roomId();
-        return plugin.rooms().defaultRoom().roomId();
-    }
-
-    private void sendRoomInfo(Player p, GameManager g) {
-        if (g == null) { p.sendMessage(plugin.msg("prefix") + "§c房间不存在"); return; }
-        p.sendMessage(plugin.msg("prefix") + "§e===== 房间 [" + g.roomId() + "] =====");
-        p.sendMessage(" §7房主: " + (g.owner() != null ? plugin.players().getOrCreate(g.owner(), null).name : "系统"));
-        p.sendMessage(" §7世界: §b" + (g.roomWorldName() != null ? g.roomWorldName()
-                : (g.roomWorld() != null ? g.roomWorld().getName() : "?")));
-        p.sendMessage(" §7模式: " + g.modeDisplay() + "  §7状态: " + g.stateDisplay());
-        p.sendMessage(" §7参战: §e" + g.playerCount() + " §7人  §7存活: §a" + g.aliveCount() + " §7人");
-        StringBuilder members = new StringBuilder();
-        for (UUID u : g.inGamePlayers()) {
-            String nm = plugin.players().getOrCreate(u, null).name;
-            if (members.length() > 0) members.append("§7, ");
-            members.append("§f").append(nm);
+    public void sendGameStatus(CommandSender commandSender) {
+        GameManager gameManager = this.plugin.games();
+        commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u5bf9\u5c40\u72b6\u6001 =====");
+        commandSender.sendMessage(" \u00a77\u6a21\u5f0f: " + gameManager.modeDisplay() + "  \u00a77\u72b6\u6001: " + gameManager.stateDisplay());
+        commandSender.sendMessage(" \u00a77\u53c2\u6218: \u00a7e" + gameManager.playerCount() + " \u00a77\u4eba" + (gameManager.state() == GameManager.State.RUNNING ? "  \u00a77\u5b58\u6d3b: \u00a7a" + gameManager.aliveCount() + " \u00a77\u4eba" : "  \u00a77\u5df2\u62a5\u540d: \u00a7e" + gameManager.joinedCount() + " \u00a77\u4eba"));
+        if (gameManager.state() == GameManager.State.COUNTDOWN) {
+            commandSender.sendMessage(" \u00a77\u5373\u5c06\u5f00\u59cb, \u62a5\u540d\u4e2d... \u7ba1\u7406\u5458\u53ef\u7528 \u00a7e/box game start <solo|pvp|team> \u00a77\u5f00\u8d5b");
+        } else if (gameManager.state() == GameManager.State.IDLE) {
+            commandSender.sendMessage(" \u00a77\u7a7a\u95f2. \u8f93\u5165 \u00a7e/box game join \u00a77\u62a5\u540d, \u7ba1\u7406\u5458 \u00a7e/box game start <solo|pvp|team> \u00a77\u5f00\u8d5b");
         }
-        p.sendMessage(" §7成员: " + (members.length() > 0 ? members.toString() : "§7(空)"));
-        p.sendMessage(" §7加入: §e/box room join " + g.roomId() + " §7| 退出: §e/box room leave " + g.roomId());
     }
 
-    private void sendRoomList(Player p) {
-        RoomManager mgr = plugin.rooms();
-        p.sendMessage(plugin.msg("prefix") + "§e===== 在线对局房间 =====");
-        for (String id : mgr.roomIds()) {
-            GameManager g = mgr.get(id);
-            if (g == null) continue;
-            String owner = g.owner() != null ? plugin.players().getOrCreate(g.owner(), null).name : "系统";
-            int n = 0; StringBuilder names = new StringBuilder();
-            for (Player op : mgr.onlinePlayersIn(id)) {
-                if (n++ < 8) { if (names.length() > 0) names.append("§7,"); names.append("§f").append(op.getName()); }
+    private boolean admin(CommandSender commandSender, String[] stringArray) {
+        String string;
+        if (!this.hasAdmin(commandSender)) {
+            return true;
+        }
+        switch (string = stringArray.length > 1 ? stringArray[1].toLowerCase(Locale.ROOT) : "") {
+            case "boxes": {
+                commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7269\u8d44\u7bb1\u603b\u6570: \u00a7a" + this.plugin.boxes().count() + "\u00a7e/" + this.plugin.getConfig().getInt("boxes.max-count", 320));
+                for (Map.Entry<Rarity, Integer> entry : this.plugin.boxes().countByRarity().entrySet()) {
+                    commandSender.sendMessage(" \u00a77" + entry.getKey().display + ": " + String.valueOf(entry.getValue()) + " \u4e2a");
+                }
+                commandSender.sendMessage(" \u00a77\u9884\u751f\u6210: " + (String)(this.plugin.worlds().pregenRunning() ? "\u8fdb\u884c\u4e2d " + this.plugin.worlds().pregenDone() + "/" + this.plugin.worlds().pregenTotal() : (this.plugin.worlds().isReady() ? "\u5b8c\u6210" : "\u7b49\u5f85\u4e16\u754c...")));
+                break;
             }
-            p.sendMessage(" §e" + id + " §7[房主 " + owner + "] -> §b"
-                    + (g.roomWorldName() != null ? g.roomWorldName()
-                    : (g.roomWorld() != null ? g.roomWorld().getName() : "?"))
-                    + " §7状态: " + g.stateDisplay() + " §7参战: §e" + g.playerCount()
-                    + (names.length() > 0 ? " §7成员: " + names : ""));
+            case "fill": {
+                if (!this.plugin.worlds().isReady()) {
+                    commandSender.sendMessage(this.plugin.msg("not-ready"));
+                    return true;
+                }
+                int n = Math.min(40, this.plugin.boxMaxCount() - this.plugin.boxes().count());
+                for (int i = 0; i < n; ++i) {
+                    this.plugin.boxes().spawnRandomBox(this.plugin.weightedPickForWorld(), false, null);
+                }
+                commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u6295\u653e " + n + " \u4e2a\u968f\u673a\u7269\u8d44\u7bb1\u3002");
+                break;
+            }
+            case "airdrop": {
+                if (!this.plugin.worlds().isReady()) {
+                    commandSender.sendMessage(this.plugin.msg("not-ready"));
+                    return true;
+                }
+                commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7d\u7acb\u5373\u7a7a\u6295!");
+                this.plugin.airdrops().dropNow(null);
+                break;
+            }
+            case "wipe": {
+                this.handleWipe(commandSender);
+                break;
+            }
+            default: {
+                commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e/box admin boxes|fill|airdrop|wipe");
+            }
         }
-        p.sendMessage(" §7加入: §e/box room join <id> §7| 建房: §e/box room create <id>"
-                + " §7| 邀请: §e/box room invite <玩家> [房间]");
-        if (p.hasPermission("terrabox.admin")) {
-            p.sendMessage(" §7管理员: §e/box room start|stop|remove|force <玩家> <房间>");
+        return true;
+    }
+
+    private void room(Player player, String[] stringArray) {
+        String string;
+        RoomManager roomManager = this.plugin.rooms();
+        if (stringArray.length < 2) {
+            this.plugin.roomGui().open(player);
+            return;
+        }
+        switch (string = stringArray[1].toLowerCase(Locale.ROOT)) {
+            case "list": {
+                this.sendRoomList(player);
+                break;
+            }
+            case "create": {
+                this.createRoomFor(player, stringArray.length >= 3 ? stringArray[2] : null);
+                break;
+            }
+            case "invite": {
+                if (stringArray.length < 3) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room invite <\u73a9\u5bb6> [\u623f\u95f4]");
+                    return;
+                }
+                Player player2 = Bukkit.getPlayer((String)stringArray[2]);
+                if (player2 == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u73a9\u5bb6\u4e0d\u5728\u7ebf: " + stringArray[2]);
+                    return;
+                }
+                String string2 = stringArray.length >= 4 ? stringArray[3] : this.myRoom(player);
+                this.plugin.invites().invite(player, player2, string2);
+                break;
+            }
+            case "join": {
+                if (stringArray.length < 3) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room join <id>");
+                    return;
+                }
+                GameManager gameManager = roomManager.get(stringArray[2]);
+                if (gameManager == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + stringArray[2] + " \u4e0d\u5b58\u5728");
+                    return;
+                }
+                gameManager.join(player);
+                break;
+            }
+            case "leave": {
+                if (stringArray.length < 3) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room leave <id>");
+                    return;
+                }
+                GameManager gameManager = roomManager.get(stringArray[2]);
+                if (gameManager == null) break;
+                gameManager.leave(player);
+                break;
+            }
+            case "info": {
+                if (stringArray.length < 3) {
+                    this.sendRoomList(player);
+                    return;
+                }
+                this.sendRoomInfo(player, roomManager.get(stringArray[2]));
+                break;
+            }
+            case "remove": {
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return;
+                }
+                if (stringArray.length < 3) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room remove <id>");
+                    return;
+                }
+                String string3 = stringArray[2];
+                if (!roomManager.hasRoom(string3)) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + string3 + " \u4e0d\u5b58\u5728");
+                    return;
+                }
+                if ("default".equalsIgnoreCase(string3)) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u4e0d\u80fd\u5220\u9664\u9ed8\u8ba4\u623f\u95f4");
+                    return;
+                }
+                GameManager gameManager = roomManager.get(string3);
+                if (gameManager != null && gameManager.isRunning()) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + string3 + " \u5bf9\u5c40\u8fdb\u884c\u4e2d, \u5148\u505c\u6b62");
+                    return;
+                }
+                roomManager.removeRoom(string3);
+                player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u5220\u9664\u5bf9\u5c40\u623f\u95f4 \u00a7e" + string3);
+                break;
+            }
+            case "start": {
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return;
+                }
+                if (stringArray.length < 4) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room start <id> <solo|pvp|team>");
+                    return;
+                }
+                String string4 = stringArray[2];
+                GameManager.Mode mode = stringArray.length >= 4 ? GameManager.Mode.parse(stringArray[3]) : GameManager.Mode.PVP;
+                GameManager gameManager = roomManager.get(string4);
+                if (gameManager == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + string4 + " \u4e0d\u5b58\u5728");
+                    return;
+                }
+                if (mode == null) break;
+                gameManager.startGame((CommandSender)player, mode);
+                break;
+            }
+            case "stop": {
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return;
+                }
+                if (stringArray.length < 3) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u7528\u6cd5: /box room stop <id>");
+                    return;
+                }
+                GameManager gameManager = roomManager.get(stringArray[2]);
+                if (gameManager == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + stringArray[2] + " \u4e0d\u5b58\u5728");
+                    return;
+                }
+                gameManager.stopGame((CommandSender)player);
+                break;
+            }
+            case "force": {
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return;
+                }
+                if (stringArray.length < 4) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: /box room force <\u73a9\u5bb6> <\u623f\u95f4>");
+                    return;
+                }
+                Player player3 = Bukkit.getPlayer((String)stringArray[2]);
+                if (player3 == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u73a9\u5bb6\u4e0d\u5728\u7ebf: " + stringArray[2]);
+                    return;
+                }
+                GameManager gameManager = roomManager.get(stringArray[3]);
+                if (gameManager == null) {
+                    player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + stringArray[3] + " \u4e0d\u5b58\u5728");
+                    return;
+                }
+                if (!gameManager.join(player3)) break;
+                player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u5f3a\u5236 \u00a7e" + player3.getName() + " \u00a7a\u52a0\u5165\u623f\u95f4 \u00a7e" + stringArray[3]);
+                player3.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7ba1\u7406\u5458\u5c06\u4f60\u52a0\u5165\u4e86\u623f\u95f4 \u00a7b" + stringArray[3]);
+                break;
+            }
+            case "status": {
+                if (stringArray.length < 3) {
+                    this.sendRoomList(player);
+                    return;
+                }
+                if (!this.hasAdmin((CommandSender)player)) {
+                    return;
+                }
+                this.sendRoomInfo(player, roomManager.get(stringArray[2]));
+                break;
+            }
+            default: {
+                this.sendRoomList(player);
+            }
         }
     }
 
-    private void handleWipe(CommandSender sender) {
-        if (wipeArmed) {
-            wipeArmed = false;
-            sender.sendMessage(plugin.msg("prefix") + "§e正在清空全部物资箱...");
-            plugin.boxes().wipeAll(() -> sender.sendMessage(plugin.msg("prefix") + "§a物资箱已全部清空。"));
+    public void createRoomFor(Player player, String string) {
+        RoomManager roomManager = this.plugin.rooms();
+        Object object = string;
+        if (object == null || ((String)object).isBlank()) {
+            int n = (int)(System.currentTimeMillis() % 1000L);
+            object = "room_" + n;
+            while (roomManager.hasRoom((String)object)) {
+                object = "room_" + n++;
+            }
+        }
+        if (roomManager.hasRoom((String)(object = ((String)object).toLowerCase(Locale.ROOT)))) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4 " + (String)object + " \u5df2\u5b58\u5728");
+            return;
+        }
+        String string2 = this.plugin.worlds().world() != null ? this.plugin.worlds().world().getName() : null;
+        GameManager gameManager = roomManager.createRoom((String)object, string2);
+        gameManager.setOwner(player.getUniqueId());
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u5df2\u521b\u5efa\u5bf9\u5c40\u623f\u95f4 \u00a7e" + (String)object + " \u00a7a(\u4f60\u662f\u623f\u4e3b, \u53ef\u7528 /box room invite <\u73a9\u5bb6> \u9080\u8bf7)");
+        player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.3f);
+    }
+
+    private void invite(Player player, String[] stringArray) {
+        if (stringArray.length < 2) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: \u00a7f/box invite accept|decline \u00a77(\u70b9\u51fb\u804a\u5929\u6846\u9080\u8bf7\u6587\u672c\u5373\u53ef)");
+            return;
+        }
+        switch (stringArray[1].toLowerCase(Locale.ROOT)) {
+            case "accept": {
+                this.plugin.invites().accept(player);
+                break;
+            }
+            case "decline": {
+                this.plugin.invites().decline(player);
+                break;
+            }
+            default: {
+                player.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u7528\u6cd5: \u00a7f/box invite accept|decline");
+            }
+        }
+    }
+
+    private String myRoom(Player player) {
+        Iterator<GameManager> iterator = this.plugin.rooms().joinedRooms(player.getUniqueId()).iterator();
+        if (iterator.hasNext()) {
+            GameManager gameManager = iterator.next();
+            return gameManager.roomId();
+        }
+        return this.plugin.rooms().defaultRoom().roomId();
+    }
+
+    private void sendRoomInfo(Player player, GameManager gameManager) {
+        if (gameManager == null) {
+            player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u623f\u95f4\u4e0d\u5b58\u5728");
+            return;
+        }
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u623f\u95f4 [" + gameManager.roomId() + "] =====");
+        player.sendMessage(" \u00a77\u623f\u4e3b: " + (gameManager.owner() != null ? this.plugin.players().getOrCreate((UUID)gameManager.owner(), null).name : "\u7cfb\u7edf"));
+        player.sendMessage(" \u00a77\u4e16\u754c: \u00a7b" + (gameManager.roomWorldName() != null ? gameManager.roomWorldName() : (gameManager.roomWorld() != null ? gameManager.roomWorld().getName() : "?")));
+        player.sendMessage(" \u00a77\u6a21\u5f0f: " + gameManager.modeDisplay() + "  \u00a77\u72b6\u6001: " + gameManager.stateDisplay());
+        player.sendMessage(" \u00a77\u53c2\u6218: \u00a7e" + gameManager.playerCount() + " \u00a77\u4eba  \u00a77\u5b58\u6d3b: \u00a7a" + gameManager.aliveCount() + " \u00a77\u4eba");
+        StringBuilder stringBuilder = new StringBuilder();
+        for (UUID uUID : gameManager.inGamePlayers()) {
+            String string = this.plugin.players().getOrCreate((UUID)uUID, null).name;
+            if (stringBuilder.length() > 0) {
+                stringBuilder.append("\u00a77, ");
+            }
+            stringBuilder.append("\u00a7f").append(string);
+        }
+        player.sendMessage(" \u00a77\u6210\u5458: " + (stringBuilder.length() > 0 ? stringBuilder.toString() : "\u00a77(\u7a7a)"));
+        player.sendMessage(" \u00a77\u52a0\u5165: \u00a7e/box room join " + gameManager.roomId() + " \u00a77| \u9000\u51fa: \u00a7e/box room leave " + gameManager.roomId());
+    }
+
+    private void sendRoomList(Player player) {
+        RoomManager roomManager = this.plugin.rooms();
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u5728\u7ebf\u5bf9\u5c40\u623f\u95f4 =====");
+        for (String string : roomManager.roomIds()) {
+            GameManager gameManager = roomManager.get(string);
+            if (gameManager == null) continue;
+            String string2 = gameManager.owner() != null ? this.plugin.players().getOrCreate((UUID)gameManager.owner(), null).name : "\u7cfb\u7edf";
+            int n = 0;
+            StringBuilder stringBuilder = new StringBuilder();
+            for (Player player2 : roomManager.onlinePlayersIn(string)) {
+                if (n++ >= 8) continue;
+                if (stringBuilder.length() > 0) {
+                    stringBuilder.append("\u00a77,");
+                }
+                stringBuilder.append("\u00a7f").append(player2.getName());
+            }
+            player.sendMessage(" \u00a7e" + string + " \u00a77[\u623f\u4e3b " + string2 + "] -> \u00a7b" + (gameManager.roomWorldName() != null ? gameManager.roomWorldName() : (gameManager.roomWorld() != null ? gameManager.roomWorld().getName() : "?")) + " \u00a77\u72b6\u6001: " + gameManager.stateDisplay() + " \u00a77\u53c2\u6218: \u00a7e" + gameManager.playerCount() + (String)(stringBuilder.length() > 0 ? " \u00a77\u6210\u5458: " + String.valueOf(stringBuilder) : ""));
+        }
+        player.sendMessage(" \u00a77\u52a0\u5165: \u00a7e/box room join <id> \u00a77| \u5efa\u623f: \u00a7e/box room create <id> \u00a77| \u9080\u8bf7: \u00a7e/box room invite <\u73a9\u5bb6> [\u623f\u95f4]");
+        if (player.hasPermission("terrabox.admin")) {
+            player.sendMessage(" \u00a77\u7ba1\u7406\u5458: \u00a7e/box room start|stop|remove|force <\u73a9\u5bb6> <\u623f\u95f4>");
+        }
+    }
+
+    private void handleWipe(CommandSender commandSender) {
+        if (this.wipeArmed) {
+            this.wipeArmed = false;
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u6b63\u5728\u6e05\u7a7a\u5168\u90e8\u7269\u8d44\u7bb1...");
+            this.plugin.boxes().wipeAll(() -> commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7a\u7269\u8d44\u7bb1\u5df2\u5168\u90e8\u6e05\u7a7a\u3002"));
         } else {
-            wipeArmed = true;
-            Bukkit.getGlobalRegionScheduler().runDelayed(plugin, t -> wipeArmed = false, 200L);
-            sender.sendMessage(plugin.msg("prefix") + "§e再次输入 /box admin wipe 以确认清空全部物资箱 (10秒内)。");
+            this.wipeArmed = true;
+            Bukkit.getGlobalRegionScheduler().runDelayed((Plugin)this.plugin, scheduledTask -> {
+                this.wipeArmed = false;
+            }, 200L);
+            commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e\u518d\u6b21\u8f93\u5165 /box admin wipe \u4ee5\u786e\u8ba4\u6e05\u7a7a\u5168\u90e8\u7269\u8d44\u7bb1 (10\u79d2\u5185)\u3002");
         }
     }
 
-    // ==================== 信息输出 ====================
-
-    public void sendTop(CommandSender to) {
-        plugin.players().topAsync(list -> {
-            to.sendMessage(plugin.msg("top-header"));
+    public void sendTop(CommandSender commandSender) {
+        this.plugin.players().topAsync(list -> {
+            commandSender.sendMessage(this.plugin.msg("top-header"));
             if (list.isEmpty()) {
-                to.sendMessage(plugin.msg("prefix") + "§7暂无数据, 快去开箱吧!");
+                commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a77\u6682\u65e0\u6570\u636e, \u5feb\u53bb\u5f00\u7bb1\u5427!");
                 return;
             }
-            int rank = 1;
-            for (PlayerStore.TopEntry e : list) {
-                to.sendMessage(plugin.msg("top-line")
-                        .replace("{rank}", String.valueOf(rank++))
-                        .replace("{player}", e.name())
-                        .replace("{count}", String.valueOf(e.count())));
+            int n = 1;
+            for (PlayerStore.TopEntry topEntry : list) {
+                commandSender.sendMessage(this.plugin.msg("top-line").replace("{rank}", String.valueOf(n++)).replace("{player}", topEntry.name()).replace("{count}", String.valueOf(topEntry.count())));
             }
         });
     }
 
-    public void sendStats(CommandSender to, Player target) {
-        PlayerStore.PlayerData d = plugin.players().getOrCreate(target.getUniqueId(), target.getName());
-        to.sendMessage(plugin.msg("prefix") + "§e===== " + d.name + " 的物资统计 =====");
-        to.sendMessage(" §f普通: §7" + d.openedCommon.get()
-                + "  §a精良: §7" + d.openedRare.get()
-                + "  §b稀有: §7" + d.openedEpic.get());
-        to.sendMessage(" §6传说: §7" + d.openedLegendary.get()
-                + "  §d绝世: §7" + d.openedMythic.get()
-                + "  §f合计: §a" + d.openedTotal());
-        to.sendMessage(" §7空投搜刮: §d" + d.airdropLooted.get()
-                + "  §7寻宝次数: §b" + d.huntCount.get()
-                + "  §7累计回收: §e" + d.soldValue.get() + " 元");
-        to.sendMessage(" §7余额: §e" + (long) plugin.econ().balance(target)
-                + " (" + plugin.econ().name() + ")");
+    public void sendStats(CommandSender commandSender, Player player) {
+        PlayerStore.PlayerData playerData = this.plugin.players().getOrCreate(player.getUniqueId(), player.getName());
+        commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== " + playerData.name + " \u7684\u7269\u8d44\u7edf\u8ba1 =====");
+        commandSender.sendMessage(" \u00a7f\u666e\u901a: \u00a77" + playerData.openedCommon.get() + "  \u00a7a\u7cbe\u826f: \u00a77" + playerData.openedRare.get() + "  \u00a7b\u7a00\u6709: \u00a77" + playerData.openedEpic.get());
+        commandSender.sendMessage(" \u00a76\u4f20\u8bf4: \u00a77" + playerData.openedLegendary.get() + "  \u00a7d\u7edd\u4e16: \u00a77" + playerData.openedMythic.get() + "  \u00a7f\u5408\u8ba1: \u00a7a" + playerData.openedTotal());
+        commandSender.sendMessage(" \u00a77\u7a7a\u6295\u641c\u522e: \u00a7d" + playerData.airdropLooted.get() + "  \u00a77\u5bfb\u5b9d\u6b21\u6570: \u00a7b" + playerData.huntCount.get() + "  \u00a77\u7d2f\u8ba1\u56de\u6536: \u00a7e" + playerData.soldValue.get() + " \u5143");
+        commandSender.sendMessage(" \u00a77\u4f59\u989d: \u00a7e" + (long)this.plugin.econ().balance((OfflinePlayer)player) + " (" + this.plugin.econ().name() + ")");
     }
 
-    private void sendPrices(CommandSender to) {
-        to.sendMessage(plugin.msg("prefix") + "§e===== 回收价格表 (元/件) =====");
-        List<Map.Entry<String, Double>> entries = new ArrayList<>(plugin.sellPrices().entrySet());
-        entries.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
-        StringBuilder line = new StringBuilder();
-        for (Map.Entry<String, Double> e : entries) {
-            String item = "§f" + e.getKey() + " §e" + e.getValue() + "  ";
-            if (line.length() + item.length() > 80) {
-                to.sendMessage(line.toString());
-                line = new StringBuilder();
+    private void sendPrices(CommandSender commandSender) {
+        commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u56de\u6536\u4ef7\u683c\u8868 (\u5143/\u4ef6) =====");
+        ArrayList<Map.Entry<String, Double>> arrayList = new ArrayList<Map.Entry<String, Double>>(this.plugin.sellPrices().entrySet());
+        arrayList.sort((entry, entry2) -> Double.compare((Double)entry2.getValue(), (Double)entry.getValue()));
+        StringBuilder stringBuilder = new StringBuilder();
+        for (Map.Entry entry3 : arrayList) {
+            String string = "\u00a7f" + (String)entry3.getKey() + " \u00a7e" + String.valueOf(entry3.getValue()) + "  ";
+            if (stringBuilder.length() + string.length() > 80) {
+                commandSender.sendMessage(stringBuilder.toString());
+                stringBuilder = new StringBuilder();
             }
-            line.append(item);
+            stringBuilder.append(string);
         }
-        if (line.length() > 0) to.sendMessage(line.toString());
-    }
-
-    /** 物资平衡性概览: 各档权重/箱子分布/刷新周期/投放上限/特殊道具 */
-    private void sendBalance(CommandSender to) {
-        to.sendMessage(plugin.msg("prefix") + "§e===== 物资平衡性 =====");
-        // 各档权重
-        StringBuilder w = new StringBuilder();
-        for (Rarity r : Rarity.values()) {
-            w.append(r.colorCode.replace('&', '\u00A7')).append(r.display).append("§7:").append(r.weight()).append("  ");
-        }
-        to.sendMessage(" §7五档权重: " + w);
-        // 箱子分布
-        var counts = plugin.boxes().countByRarity();
-        for (Rarity r : Rarity.values()) {
-            to.sendMessage(" §7" + r.display + "箱: " + r.colorCode.replace('&', '\u00A7')
-                    + counts.getOrDefault(r, 0) + "§7 个");
-        }
-        to.sendMessage(" §7箱子总数/上限: §e" + plugin.boxes().count()
-                + "§7/§e" + plugin.getConfig().getInt("boxes.max-count", 320));
-        to.sendMessage(" §7刷新周期: §e" + plugin.getConfig().getLong("boxes.refresh-minutes", 45)
-                + " §7分钟 | 每周期补充: §e" + plugin.getConfig().getInt("boxes.refill-per-cycle", 8)
-                + " §7个 | 最小距离: §e" + plugin.getConfig().getDouble("boxes.min-distance", 18.0) + " 格");
-        to.sendMessage(" §7首次投放: §e" + plugin.getConfig().getInt("boxes.initial-fill", 150) + " §7个");
-        if (plugin.specialItems() != null && plugin.specialItems().size() > 0) {
-            to.sendMessage(" §7特殊道具: §e" + plugin.specialItems().size() + " §7种");
-        }
-        if (to instanceof Player p) {
-            to.sendMessage(" §7剩余空投: §e约 " + (plugin.airdrops().secondsUntilNext() / 60 + 1) + " 分钟后");
+        if (stringBuilder.length() > 0) {
+            commandSender.sendMessage(stringBuilder.toString());
         }
     }
 
-    private void sendHelp(Player p) {
-        p.sendMessage(plugin.msg("prefix") + "§e===== 物资大陆 帮助 =====");
-        p.sendMessage(" §f/box §7- 打开主菜单");
-        p.sendMessage(" §f/box spawn §7- 传送到随机陆地出生点 (有冷却)");
-        p.sendMessage(" §f/box sell §7- 打开物资回收商店");
-        p.sendMessage(" §f/box prices §7- 查看回收价格表");
-        p.sendMessage(" §f/box balance §7- 查看物资平衡性");
-        p.sendMessage(" §f/box hunt §7- 花钱购买高稀有箱方位提示");
-        p.sendMessage(" §f/box top §7- 开箱排行榜");
-        p.sendMessage(" §f/box stats §7- 我的统计");
-        p.sendMessage(" §f/box join §7- 报名参加对局");
-        p.sendMessage(" §f/box lobby §7- 返回大厅");
-        p.sendMessage(" §f/box spectate §7- 对局淘汰后旁观");
-        p.sendMessage(" §f/box storm §7- 查看毒圈状态");
-        p.sendMessage(" §f/box hunt §7- 花钱购买高稀有物资箱方位");
-        p.sendMessage(" §f/box room §7- 对局房间 (查看/创建/邀请/加入)");
-        p.sendMessage(" §f/box game status §7- 对局状态");
-        if (p.hasPermission("terrabox.admin")) {
-            p.sendMessage(" §c/box game start <solo|pvp|team> §7- 开始对局 (单人模式任意人数可开)");
-            p.sendMessage(" §c/box game stop §7- 终止对局");
-            p.sendMessage(" §c/box room list §7- 对局房间列表");
-            p.sendMessage(" §c/box room create <id> §7- 创建多世界对局房间");
-            p.sendMessage(" §c/box room start <id> <solo|pvp|team> §7- 在某房间开对局");
-            p.sendMessage(" §c/box room stop <id> §7- 终止某房间对局");
-            p.sendMessage(" §c/box room force <玩家> <房间> §7- 强制把玩家加入房间");
-            p.sendMessage(" §c/box terrain §7- 选择对局地形 (默认/沙漠/大岛屿)");
-            p.sendMessage(" §c/box admin boxes|fill|airdrop|wipe §7- 管理");
-            p.sendMessage(" §c/box reload §7- 重载配置");
+    private void sendBalance(CommandSender commandSender) {
+        commandSender.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u7269\u8d44\u5e73\u8861\u6027 =====");
+        StringBuilder stringBuilder = new StringBuilder();
+        for (Rarity rarity : Rarity.values()) {
+            stringBuilder.append(rarity.colorCode.replace('&', '\u00a7')).append(rarity.display).append("\u00a77:").append(rarity.weight()).append("  ");
+        }
+        commandSender.sendMessage(" \u00a77\u4e94\u6863\u6743\u91cd: " + String.valueOf(stringBuilder));
+        Map<Rarity, Integer> map = this.plugin.boxes().countByRarity();
+        for (Rarity rarity : Rarity.values()) {
+            commandSender.sendMessage(" \u00a77" + rarity.display + "\u7bb1: " + rarity.colorCode.replace('&', '\u00a7') + String.valueOf(map.getOrDefault((Object)rarity, 0)) + "\u00a77 \u4e2a");
+        }
+        commandSender.sendMessage(" \u00a77\u7bb1\u5b50\u603b\u6570/\u4e0a\u9650: \u00a7e" + this.plugin.boxes().count() + "\u00a77/\u00a7e" + this.plugin.getConfig().getInt("boxes.max-count", 320));
+        commandSender.sendMessage(" \u00a77\u5237\u65b0\u5468\u671f: \u00a7e" + this.plugin.getConfig().getLong("boxes.refresh-minutes", 45L) + " \u00a77\u5206\u949f | \u6bcf\u5468\u671f\u8865\u5145: \u00a7e" + this.plugin.getConfig().getInt("boxes.refill-per-cycle", 8) + " \u00a77\u4e2a | \u6700\u5c0f\u8ddd\u79bb: \u00a7e" + this.plugin.getConfig().getDouble("boxes.min-distance", 18.0) + " \u683c");
+        commandSender.sendMessage(" \u00a77\u9996\u6b21\u6295\u653e: \u00a7e" + this.plugin.getConfig().getInt("boxes.initial-fill", 150) + " \u00a77\u4e2a");
+        if (this.plugin.specialItems() != null && this.plugin.specialItems().size() > 0) {
+            commandSender.sendMessage(" \u00a77\u7279\u6b8a\u9053\u5177: \u00a7e" + this.plugin.specialItems().size() + " \u00a77\u79cd");
+        }
+        if (commandSender instanceof Player) {
+            Player player = (Player)commandSender;
+            commandSender.sendMessage(" \u00a77\u5269\u4f59\u7a7a\u6295: \u00a7e\u7ea6 " + (this.plugin.airdrops().secondsUntilNext() / 60L + 1L) + " \u5206\u949f\u540e");
         }
     }
 
-    private boolean hasAdmin(CommandSender s) {
-        if (!s.hasPermission("terrabox.admin")) {
-            s.sendMessage(plugin.msg("no-permission"));
+    private void sendHelp(Player player) {
+        player.sendMessage(this.plugin.msg("prefix") + "\u00a7e===== \u7269\u8d44\u5927\u9646 \u5e2e\u52a9 =====");
+        player.sendMessage(" \u00a7f/box \u00a77- \u6253\u5f00\u4e3b\u83dc\u5355");
+        player.sendMessage(" \u00a7f/box spawn \u00a77- \u4f20\u9001\u5230\u968f\u673a\u9646\u5730\u51fa\u751f\u70b9 (\u6709\u51b7\u5374)");
+        player.sendMessage(" \u00a7f/box sell \u00a77- \u6253\u5f00\u7269\u8d44\u56de\u6536\u5546\u5e97");
+        player.sendMessage(" \u00a7f/box prices \u00a77- \u67e5\u770b\u56de\u6536\u4ef7\u683c\u8868");
+        player.sendMessage(" \u00a7f/box balance \u00a77- \u67e5\u770b\u7269\u8d44\u5e73\u8861\u6027");
+        player.sendMessage(" \u00a7f/box hunt \u00a77- \u82b1\u94b1\u8d2d\u4e70\u9ad8\u7a00\u6709\u7bb1\u65b9\u4f4d\u63d0\u793a");
+        player.sendMessage(" \u00a7f/box top \u00a77- \u5f00\u7bb1\u6392\u884c\u699c");
+        player.sendMessage(" \u00a7f/box stats \u00a77- \u6211\u7684\u7edf\u8ba1");
+        player.sendMessage(" \u00a7f/box join \u00a77- \u62a5\u540d\u53c2\u52a0\u5bf9\u5c40");
+        player.sendMessage(" \u00a7f/box lobby \u00a77- \u8fd4\u56de\u5927\u5385");
+        player.sendMessage(" \u00a7f/box spectate \u00a77- \u5bf9\u5c40\u6dd8\u6c70\u540e\u65c1\u89c2");
+        player.sendMessage(" \u00a7f/box storm \u00a77- \u67e5\u770b\u6bd2\u5708\u72b6\u6001");
+        player.sendMessage(" \u00a7f/box hunt \u00a77- \u82b1\u94b1\u8d2d\u4e70\u9ad8\u7a00\u6709\u7269\u8d44\u7bb1\u65b9\u4f4d");
+        player.sendMessage(" \u00a7f/box room \u00a77- \u5bf9\u5c40\u623f\u95f4 (\u67e5\u770b/\u521b\u5efa/\u9080\u8bf7/\u52a0\u5165)");
+        player.sendMessage(" \u00a7f/box game status \u00a77- \u5bf9\u5c40\u72b6\u6001");
+        if (player.hasPermission("terrabox.admin")) {
+            player.sendMessage(" \u00a7c/box game start <solo|pvp|team> \u00a77- \u5f00\u59cb\u5bf9\u5c40 (\u5355\u4eba\u6a21\u5f0f\u4efb\u610f\u4eba\u6570\u53ef\u5f00)");
+            player.sendMessage(" \u00a7c/box game stop \u00a77- \u7ec8\u6b62\u5bf9\u5c40");
+            player.sendMessage(" \u00a7c/box room list \u00a77- \u5bf9\u5c40\u623f\u95f4\u5217\u8868");
+            player.sendMessage(" \u00a7c/box room create <id> \u00a77- \u521b\u5efa\u591a\u4e16\u754c\u5bf9\u5c40\u623f\u95f4");
+            player.sendMessage(" \u00a7c/box room start <id> <solo|pvp|team> \u00a77- \u5728\u67d0\u623f\u95f4\u5f00\u5bf9\u5c40");
+            player.sendMessage(" \u00a7c/box room stop <id> \u00a77- \u7ec8\u6b62\u67d0\u623f\u95f4\u5bf9\u5c40");
+            player.sendMessage(" \u00a7c/box room force <\u73a9\u5bb6> <\u623f\u95f4> \u00a77- \u5f3a\u5236\u628a\u73a9\u5bb6\u52a0\u5165\u623f\u95f4");
+            player.sendMessage(" \u00a7c/box terrain \u00a77- \u9009\u62e9\u5bf9\u5c40\u5730\u5f62 (\u9ed8\u8ba4/\u6c99\u6f20/\u5927\u5c9b\u5c7f)");
+            player.sendMessage(" \u00a7c/box admin boxes|fill|airdrop|wipe \u00a77- \u7ba1\u7406");
+            player.sendMessage(" \u00a7c/box reload \u00a77- \u91cd\u8f7d\u914d\u7f6e");
+        }
+    }
+
+    private boolean hasAdmin(CommandSender commandSender) {
+        if (!commandSender.hasPermission("terrabox.admin")) {
+            commandSender.sendMessage(this.plugin.msg("no-permission"));
             return false;
         }
         return true;
     }
 
-    // ==================== Tab 补全 (命令执行线程, 只读常量表) ====================
-
-    @Override
-    public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
-        List<String> out = new ArrayList<>();
-        if (args.length == 1) {
-            List<String> subs = new ArrayList<>(List.of("spawn", "sell", "hunt", "top", "stats", "prices", "balance", "join", "game", "help", "lobby", "spectate", "storm", "room", "invite"));
-            if (sender.hasPermission("terrabox.admin")) {
-                subs.add("admin");
-                subs.add("reload");
-                subs.add("terrain");
-            }
-            for (String s : subs) if (s.startsWith(args[0].toLowerCase())) out.add(s);
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("game")) {
-            for (String s : List.of("join", "status", "start", "stop")) {
-                if (s.startsWith(args[1].toLowerCase())) out.add(s);
-            }
-        } else if (args.length == 3 && args[0].equalsIgnoreCase("game")
-                && args[1].equalsIgnoreCase("start") && sender.hasPermission("terrabox.admin")) {
-            for (String s : List.of("solo", "pvp", "team")) {
-                if (s.startsWith(args[2].toLowerCase())) out.add(s);
-            }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("admin") && sender.hasPermission("terrabox.admin")) {
-            for (String s : List.of("boxes", "fill", "airdrop", "wipe")) {
-                if (s.startsWith(args[1].toLowerCase())) out.add(s);
-            }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("invite")) {
-            for (String s : List.of("accept", "decline")) {
-                if (s.startsWith(args[1].toLowerCase())) out.add(s);
-            }
-        } else if (args.length == 2 && args[0].equalsIgnoreCase("room")) {
-            List<String> rs = new ArrayList<>(List.of("list", "join", "leave", "invite", "info", "create"));
-            if (sender.hasPermission("terrabox.admin")) {
-                rs.add("start"); rs.add("stop"); rs.add("remove"); rs.add("force"); rs.add("status");
-            }
-            for (String s : rs) if (s.startsWith(args[1].toLowerCase())) out.add(s);
-        } else if (args.length >= 3 && args[0].equalsIgnoreCase("room")) {
-            String rsub = args[1].toLowerCase(java.util.Locale.ROOT);
-            // 补全房间 id
-            if (rsub.equals("join") || rsub.equals("leave") || rsub.equals("info")
-                    || rsub.equals("start") || rsub.equals("stop") || rsub.equals("remove")
-                    || rsub.equals("status") || rsub.equals("force")) {
-                // force 第二个参数是房间, 第三个是玩家 — 处理
-                if (rsub.equals("force")) {
-                    if (args.length == 3) {
-                        for (Player p : Bukkit.getOnlinePlayers()) {
-                            if (p.getName().toLowerCase().startsWith(args[2].toLowerCase())) out.add(p.getName());
+    public List<String> onTabComplete(CommandSender commandSender, Command command, String string, String[] stringArray) {
+        ArrayList<String> arrayList;
+        block21: {
+            block27: {
+                block26: {
+                    block25: {
+                        block24: {
+                            block23: {
+                                block22: {
+                                    block20: {
+                                        arrayList = new ArrayList<String>();
+                                        if (stringArray.length != 1) break block20;
+                                        ArrayList<String> arrayList2 = new ArrayList<String>(List.of("spawn", "sell", "hunt", "top", "stats", "prices", "balance", "join", "game", "help", "lobby", "spectate", "storm", "room", "invite"));
+                                        if (commandSender.hasPermission("terrabox.admin")) {
+                                            arrayList2.add("admin");
+                                            arrayList2.add("reload");
+                                            arrayList2.add("terrain");
+                                        }
+                                        for (String string2 : arrayList2) {
+                                            if (!string2.startsWith(stringArray[0].toLowerCase())) continue;
+                                            arrayList.add(string2);
+                                        }
+                                        break block21;
+                                    }
+                                    if (stringArray.length != 2 || !stringArray[0].equalsIgnoreCase("game")) break block22;
+                                    for (String string3 : List.of("join", "status", "start", "stop")) {
+                                        if (!string3.startsWith(stringArray[1].toLowerCase())) continue;
+                                        arrayList.add(string3);
+                                    }
+                                    break block21;
+                                }
+                                if (stringArray.length != 3 || !stringArray[0].equalsIgnoreCase("game") || !stringArray[1].equalsIgnoreCase("start") || !commandSender.hasPermission("terrabox.admin")) break block23;
+                                for (String string4 : List.of("solo", "pvp", "team")) {
+                                    if (!string4.startsWith(stringArray[2].toLowerCase())) continue;
+                                    arrayList.add(string4);
+                                }
+                                break block21;
+                            }
+                            if (stringArray.length != 2 || !stringArray[0].equalsIgnoreCase("admin") || !commandSender.hasPermission("terrabox.admin")) break block24;
+                            for (String string5 : List.of("boxes", "fill", "airdrop", "wipe")) {
+                                if (!string5.startsWith(stringArray[1].toLowerCase())) continue;
+                                arrayList.add(string5);
+                            }
+                            break block21;
                         }
-                        return out;
-                    } else if (args.length == 4) {
-                        for (String rid : plugin.rooms().roomIds()) {
-                            if (rid.toLowerCase().startsWith(args[3].toLowerCase())) out.add(rid);
+                        if (stringArray.length != 2 || !stringArray[0].equalsIgnoreCase("invite")) break block25;
+                        for (String string6 : List.of("accept", "decline")) {
+                            if (!string6.startsWith(stringArray[1].toLowerCase())) continue;
+                            arrayList.add(string6);
                         }
-                        return out;
+                        break block21;
                     }
-                }
-                // 其余: 补全房间 id (最后一个参数)
-                String last = args[args.length - 1].toLowerCase(java.util.Locale.ROOT);
-                for (String rid : plugin.rooms().roomIds()) {
-                    if (rid.toLowerCase().startsWith(last)) out.add(rid);
-                }
-                return out;
-            }
-            // invite/join 等: 补全在线玩家名
-            if (rsub.equals("invite")) {
-                String last = args[args.length - 1].toLowerCase(java.util.Locale.ROOT);
-                for (Player p : Bukkit.getOnlinePlayers()) {
-                    if (p.getName().toLowerCase().startsWith(last)) out.add(p.getName());
-                }
-                // invite 的第二个参数(房间)补全房间
-                if (args.length == 4) {
-                    for (String rid : plugin.rooms().roomIds()) {
-                        if (rid.toLowerCase().startsWith(last)) out.add(rid);
+                    if (stringArray.length != 2 || !stringArray[0].equalsIgnoreCase("room")) break block26;
+                    ArrayList<String> arrayList3 = new ArrayList<String>(List.of("list", "join", "leave", "invite", "info", "create"));
+                    if (commandSender.hasPermission("terrabox.admin")) {
+                        arrayList3.add("start");
+                        arrayList3.add("stop");
+                        arrayList3.add("remove");
+                        arrayList3.add("force");
+                        arrayList3.add("status");
                     }
+                    for (String string7 : arrayList3) {
+                        if (!string7.startsWith(stringArray[1].toLowerCase())) continue;
+                        arrayList.add(string7);
+                    }
+                    break block21;
                 }
-                return out;
+                if (stringArray.length < 3 || !stringArray[0].equalsIgnoreCase("room")) break block27;
+                String string8 = stringArray[1].toLowerCase(Locale.ROOT);
+                if (string8.equals("join") || string8.equals("leave") || string8.equals("info") || string8.equals("start") || string8.equals("stop") || string8.equals("remove") || string8.equals("status") || string8.equals("force")) {
+                    if (string8.equals("force")) {
+                        if (stringArray.length == 3) {
+                            for (Player player : Bukkit.getOnlinePlayers()) {
+                                if (!player.getName().toLowerCase().startsWith(stringArray[2].toLowerCase())) continue;
+                                arrayList.add(player.getName());
+                            }
+                            return arrayList;
+                        }
+                        if (stringArray.length == 4) {
+                            for (String string9 : this.plugin.rooms().roomIds()) {
+                                if (!string9.toLowerCase().startsWith(stringArray[3].toLowerCase())) continue;
+                                arrayList.add(string9);
+                            }
+                            return arrayList;
+                        }
+                    }
+                    String string10 = stringArray[stringArray.length - 1].toLowerCase(Locale.ROOT);
+                    for (String string11 : this.plugin.rooms().roomIds()) {
+                        if (!string11.toLowerCase().startsWith(string10)) continue;
+                        arrayList.add(string11);
+                    }
+                    return arrayList;
+                }
+                if (string8.equals("invite")) {
+                    String string12 = stringArray[stringArray.length - 1].toLowerCase(Locale.ROOT);
+                    for (Player object : Bukkit.getOnlinePlayers()) {
+                        if (!object.getName().toLowerCase().startsWith(string12)) continue;
+                        arrayList.add(object.getName());
+                    }
+                    if (stringArray.length == 4) {
+                        for (String string2 : this.plugin.rooms().roomIds()) {
+                            if (!string2.toLowerCase().startsWith(string12)) continue;
+                            arrayList.add(string2);
+                        }
+                    }
+                    return arrayList;
+                }
+                break block21;
             }
-        } else if (args.length == 3 && args[0].equalsIgnoreCase("room")
-                && args[1].equalsIgnoreCase("start") && sender.hasPermission("terrabox.admin")) {
-            for (String s : List.of("solo", "pvp", "team")) if (s.startsWith(args[2].toLowerCase())) out.add(s);
+            if (stringArray.length != 3 || !stringArray[0].equalsIgnoreCase("room") || !stringArray[1].equalsIgnoreCase("start") || !commandSender.hasPermission("terrabox.admin")) break block21;
+            for (String string13 : List.of("solo", "pvp", "team")) {
+                if (!string13.startsWith(stringArray[2].toLowerCase())) continue;
+                arrayList.add(string13);
+            }
         }
-        return out;
+        return arrayList;
     }
 }
