@@ -143,7 +143,6 @@ public class CraftGui {
      */
     public void craft(Player player, Inventory inventory, GuiListener.GuiHolder guiHolder) {
         int n;
-        void entry;
         List<CraftManager.Recipe> list = this.plugin.crafts().recipes();
         if (list.isEmpty()) {
             player.sendMessage(this.plugin.msg("prefix") + "\u00a7c\u6682\u65e0\u53ef\u7528\u914d\u65b9\u3002");
